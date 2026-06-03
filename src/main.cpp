@@ -296,75 +296,63 @@ void ATTENDREREPOS() {
 // SÉQUENCE 1 : ESCALIER avec repositionnement du stylo
 // ==============================================================================
 //
-// Géométrie du robot :
-//   - Stylo = 9cm (90mm) DEVANT l'axe des roues
-//   - Quand le robot avance, le stylo trace devant
-//   - Quand on pivote, l'AXE ne bouge pas mais le stylo trace un arc
+// Stratégie :
+//   Le stylo est à 9cm (PEN_OFFSET) devant l'axe des roues.
+//   Pour faire un coin à 90° au point B :
+//     1. Reculer 9cm → le stylo revient SUR le trait existant (invisible)
+//        et l'AXE arrive au point B (le coin)
+//     2. Pivoter 90° → l'axe reste en B, le stylo trace un arc (= coin arrondi)
+//        Après pivot : stylo est à 9cm de B dans la NOUVELLE direction
+//     3. Le segment suivant est réduit de 9cm (l'arc a déjà "tracé" 9cm)
 //
-// Stratégie de repositionnement pour un coin à 90° :
-//   1. Reculer de 9cm → l'axe arrive au dernier point tracé (le "coin")
-//   2. Pivoter 90° → l'axe reste au coin, le stylo trace un arc de rayon 9cm
-//      Cet arc EST le coin (arrondi mais centré au bon endroit)
-//   3. Avancer : le stylo continue dans la nouvelle direction perpendiculaire
-//      MAIS il est déjà à 9cm du coin → on soustrait 9cm du segment suivant
+//   L'arc au coin est inévitable sans lève-stylo. Il est centré au bon point
+//   et les segments gardent les bonnes longueurs totales.
 //
-// Escalier : 20cm horizontal, 10cm vertical, 40cm horizontal
-// Ajustement : chaque segment après un virage est réduit de PEN_OFFSET_MM
-//              car l'arc de pivot "consomme" déjà 9cm dans la nouvelle direction
+// Escalier demandé : 10cm → 90° ↑ → 10cm → 90° → → 40cm
 //
 
 void repositionnerEtTourner(float angleDegrees) {
-  // Étape 1 : Reculer de PEN_OFFSET pour placer l'axe au point du coin
-  moveDistance(-PEN_OFFSET_MM);
+  // Reculer SUR le trait existant (superposé = invisible)
+  moveDistance(-PEN_OFFSET_MM);  // -90mm = reculer 9cm
   ATTENDREREPOS();
   delay(300);
 
-  // Étape 2 : Pivoter (l'axe reste au coin, le stylo trace l'arc = le coin arrondi)
+  // Pivoter : l'axe est au coin, le stylo trace un arc de 9cm (le coin arrondi)
   rotate(angleDegrees);
   ATTENDREREPOS();
   delay(300);
-
-  // Après le pivot, le stylo est à PEN_OFFSET_MM dans la nouvelle direction
-  // Le segment suivant doit être réduit de PEN_OFFSET_MM
 }
 
 void drawStairs() {
   sequenceEnCours = true;
 
-  // L'escalier fait : 20cm → virage 90° gauche → 10cm ↑ → virage 90° droite → 40cm →
-  //
-  // Segment 1 : avancer 20cm (200mm)
-  // Mais le premier trait part du stylo qui est déjà 9cm devant l'axe
-  // Donc on trace exactement 200mm
-  moveDistance(STEP_WIDTH_MM);  // 200mm = 20cm
+  // === SEGMENT 1 : tracer 10cm horizontal ===
+  moveDistance(100.0);  // 10cm = 100mm
   ATTENDREREPOS();
   delay(500);
 
-  // Virage 1 : tourner 90° à gauche (montée)
-  // Le robot recule 9cm, pivote, et le stylo se retrouve 9cm dans la nouvelle direction
-  repositionnerEtTourner(-90.0);  // -90 = tourner à gauche (sens horaire vu du dessus? Non: gauche)
+  // === COIN 1 : tourner 90° gauche (vers le haut) ===
+  // Recule 9cm sur le trait (invisible), pivote, stylo est à 9cm vers le haut
+  repositionnerEtTourner(-90.0);
   delay(300);
 
-  // Segment 2 : monter de 10cm (100mm)
-  // Mais l'arc a déjà "consommé" 9cm dans cette direction
-  // Donc il reste 100 - 90 = 10mm à tracer en ligne droite
-  float segment2 = STEP_HEIGHT_MM - PEN_OFFSET_MM;
-  if (segment2 > 5.0) {  // Seulement si il reste assez à tracer
-    moveDistance(segment2);
+  // === SEGMENT 2 : tracer 10cm vertical (montée) ===
+  // L'arc a déjà tracé 9cm vers le haut → reste 10cm - 9cm = 1cm
+  float reste_seg2 = 100.0 - PEN_OFFSET_MM;  // 100 - 90 = 10mm
+  if (reste_seg2 > 3.0) {
+    moveDistance(reste_seg2);
     ATTENDREREPOS();
-    delay(500);
-  } else {
-    delay(500);  // Le segment est quasi entièrement couvert par l'arc
   }
+  delay(500);
 
-  // Virage 2 : tourner 90° à droite (reprendre l'horizontale)
+  // === COIN 2 : tourner 90° droite (reprendre l'horizontale) ===
   repositionnerEtTourner(90.0);
   delay(300);
 
-  // Segment 3 : avancer 40cm (400mm)
-  // Même logique : l'arc a consommé 9cm
-  float segment3 = 400.0 - PEN_OFFSET_MM;  // 400 - 90 = 310mm
-  moveDistance(segment3);
+  // === SEGMENT 3 : tracer 40cm horizontal ===
+  // L'arc a déjà tracé 9cm vers la droite → reste 40cm - 9cm = 31cm
+  float reste_seg3 = 400.0 - PEN_OFFSET_MM;  // 400 - 90 = 310mm
+  moveDistance(reste_seg3);
   ATTENDREREPOS();
 
   arreterMoteurs();
