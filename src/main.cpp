@@ -293,66 +293,109 @@ void ATTENDREREPOS() {
 }
 
 // ==============================================================================
-// SÉQUENCE 1 : ESCALIER avec repositionnement du stylo
+// SÉQUENCE 1 : ESCALIER — logique arc asymétrique (d'après Sequences.cpp)
 // ==============================================================================
 //
-// Stratégie :
-//   Le stylo est à 9cm (PEN_OFFSET) devant l'axe des roues.
-//   Pour faire un coin à 90° au point B :
-//     1. Reculer 9cm → le stylo revient SUR le trait existant (invisible)
-//        et l'AXE arrive au point B (le coin)
-//     2. Pivoter 90° → l'axe reste en B, le stylo trace un arc (= coin arrondi)
-//        Après pivot : stylo est à 9cm de B dans la NOUVELLE direction
-//     3. Le segment suivant est réduit de 9cm (l'arc a déjà "tracé" 9cm)
+// Les virages à 90° sont exécutés par arcs PWM asymétriques contrôlés
+// par la distance encodeur, en 3 phases (amorce / correction / fin).
+// Pas de recul ni de pivot sur place : le tracé est continu.
 //
-//   L'arc au coin est inévitable sans lève-stylo. Il est centré au bon point
-//   et les segments gardent les bonnes longueurs totales.
+// Escalier : 20cm → virage gauche 90° → 10cm → virage droit 90° → 40cm
 //
-// Escalier demandé : 10cm → 90° ↑ → 10cm → 90° → → 40cm
+// Seuils de distance scalés depuis la référence (ENTRAXE_REF=83mm → 135mm,
+// facteur ×1.627). À affiner sur le robot réel.
 //
 
-void repositionnerEtTourner(float angleDegrees) {
-  // Reculer SUR le trait existant (superposé = invisible)
-  moveDistance(-PEN_OFFSET_MM);  // -90mm = reculer 9cm
-  ATTENDREREPOS();
-  delay(300);
+// --- Virage gauche 90° par arc asymétrique ---
+static void arcGauche90() {
+  // Phase 1 : amorce — roue gauche lente, roue droite rapide
+  resetAutoEncoders();
+  avancerMoteurs(29, 155);
+  while (getAutoAverageDistance() < 68.0) {
+    updateEtatRobot(); server.handleClient(); delay(10);
+  }
 
-  // Pivoter : l'axe est au coin, le stylo trace un arc de 9cm (le coin arrondi)
-  rotate(angleDegrees);
-  ATTENDREREPOS();
+  // Phase 2 : correction — inversion des rôles
+  resetAutoEncoders();
+  avancerMoteurs(155, 35);
+  while (getAutoAverageDistance() < 96.0) {
+    updateEtatRobot(); server.handleClient(); delay(10);
+  }
+
+  // Phase 3 : fin du virage
+  delay(100);
+  avancerMoteurs(165, 55);
+  while (getAutoAverageDistance() < 114.0) {
+    updateEtatRobot(); server.handleClient(); delay(10);
+  }
+
+  // Arrêt complet + stabilisation avant le prochain segment droit
+  arreterMoteurs();
+  currentState = REPOS;
+  integralDir = 0;
+  lastErrorDir = 0;
+  integralDist = 0;
   delay(300);
+}
+
+// --- Virage droit 90° par arc asymétrique ---
+// Seuils réduits de moitié par rapport au gauche : le moteur droit est plus puissant
+// et l'arc atteignait ~180° avec les mêmes valeurs.
+static void arcDroit90() {
+  // Phase 1 : amorce — roue gauche rapide, roue droite lente
+  resetAutoEncoders();
+  avancerMoteurs(165, 29);
+  while (getAutoAverageDistance() < 34.0) {
+    server.handleClient(); delay(10);
+  }
+
+  // Phase 2 : correction
+  resetAutoEncoders();
+  avancerMoteurs(35, 165);
+  while (getAutoAverageDistance() < 48.0) {
+    server.handleClient(); delay(10);
+  }
+
+  // Phase 3 : fin du virage
+  delay(100);
+  avancerMoteurs(55, 175);
+  while (getAutoAverageDistance() < 57.0) {
+    server.handleClient(); delay(10);
+  }
+
+  // Arrêt complet + purge des intégrales PID
+  arreterMoteurs();
+  currentState = REPOS;
+  integralDir = 0;
+  lastErrorDir = 0;
+  integralDist = 0;
+  delay(400);
 }
 
 void drawStairs() {
   sequenceEnCours = true;
 
-  // === SEGMENT 1 : tracer 10cm horizontal ===
-  moveDistance(100.0);  // 10cm = 100mm
+  // === SEGMENT 1 : 20cm horizontal ===
+  moveDistance(200.0);
   ATTENDREREPOS();
   delay(500);
 
-  // === COIN 1 : tourner 90° gauche (vers le haut) ===
-  // Recule 9cm sur le trait (invisible), pivote, stylo est à 9cm vers le haut
-  repositionnerEtTourner(-90.0);
-  delay(300);
+  // === VIRAGE GAUCHE 90° (vers le haut) ===
+  arcGauche90();
 
-  // === SEGMENT 2 : tracer 10cm vertical (montée) ===
-  // L'arc a déjà tracé 9cm vers le haut → reste 10cm - 9cm = 1cm
-  float reste_seg2 = 100.0 - PEN_OFFSET_MM;  // 100 - 90 = 10mm
-  if (reste_seg2 > 3.0) {
-    moveDistance(reste_seg2);
-    ATTENDREREPOS();
-  }
+  // === SEGMENT 2 : 10cm vertical ===
+  // L'arc trace déjà ~3cm dans la nouvelle direction → on réduit en conséquence
+  moveDistance(65.0);
+  delay(200);
+  ATTENDREREPOS();
   delay(500);
 
-  // === COIN 2 : tourner 90° droite (reprendre l'horizontale) ===
-  repositionnerEtTourner(90.0);
-  delay(300);
+  // === VIRAGE DROIT 90° (reprendre l'horizontale) ===
+  arcDroit90();
 
-  // === SEGMENT 3 : tracer 40cm horizontal ===
-  // L'arc a déjà tracé 9cm vers la droite → reste 40cm - 9cm = 31cm
-  float reste_seg3 = 400.0 - PEN_OFFSET_MM;  // 400 - 90 = 310mm
-  moveDistance(reste_seg3);
+  // === SEGMENT 3 : 40cm horizontal ===
+  moveDistance(400.0);
+  delay(200);
   ATTENDREREPOS();
 
   arreterMoteurs();
