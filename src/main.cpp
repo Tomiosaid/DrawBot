@@ -472,30 +472,33 @@ static void marquerPoint() {
 // Arc droit  : G rapide, D lente → diff = ticsG - ticsD
 // SPEED_ARC_SLOW à ajuster pour rendre l'arc plus ou moins serré visuellement.
 // ==============================================================================
-#define SPEED_ARC_SLOW   80
+// ==============================================================================
+// MARCHE : un seul arc gauche jusqu'à 90° (différentiel encodeurs),
+// puis toute petite correction droite pour réaligner le segment 3.
+//
+// Angle contrôlé par : diff = ticsD - ticsG = DIFF_TICKS_90 = 390
+// Courbure visuelle réglée par SPEED_ARC_SLOW (plus proche de FAST = arc plus doux)
+// TICKS_CORRECT : correction mini après l'arc (ajuster si segment 3 pas droit)
+// ==============================================================================
+#define SPEED_ARC_SLOW  120   // proche de FAST → arc doux, grand rayon
 #define SPEED_ARC_FAST  150
-#define DIFF_TICKS_90   390   // (π/2 × 82) / 0.330
+#define DIFF_TICKS_90   390   // (π/2 × 82) / 0.330 → 90° de rotation
+#define TICKS_CORRECT    10   // correction douce après l'arc
 
-static void seq_arcGauche90() {
+static void seq_marche() {
+  // Arc gauche 90° : G lente, D rapide, arrêt sur différentiel
   resetAutoEncoders();
   avancerMoteurs(SPEED_ARC_SLOW, SPEED_ARC_FAST);
   while ((autoTicsD - autoTicsG) < DIFF_TICKS_90) { server.handleClient(); delay(5); }
   arreterMoteurs();
   delay(250);
-}
 
-static void seq_arcDroit90() {
+  // Correction droite mini pour réaligner cap segment 3
   resetAutoEncoders();
   avancerMoteurs(SPEED_ARC_FAST, SPEED_ARC_SLOW);
-  while ((autoTicsG - autoTicsD) < DIFF_TICKS_90) { server.handleClient(); delay(5); }
+  while ((autoTicsG - autoTicsD) < TICKS_CORRECT) { server.handleClient(); delay(5); }
   arreterMoteurs();
   delay(250);
-}
-
-static void seq_marche() {
-  seq_arcGauche90();       // virage gauche 90° en arc
-  seq_avancer(100.0f);     // marche 10cm droite
-  seq_arcDroit90();        // virage droit 90° en arc
 }
 
 // ==============================================================================
