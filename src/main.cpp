@@ -15,9 +15,9 @@ WebServer server(80);
 #define WHEEL_DIAMETER_MM 90.0
 #define WHEEL_CIRCUMFERENCE (WHEEL_DIAMETER_MM * PI)
 #define ENTRAXE_MM 135.0
-#define TICKS_PAR_TOUR 700.0
+#define TICKS_PAR_TOUR 857.0   // calibré : 1000 ticks = 330mm réels (était 700)
 #define MM_PAR_TICK (WHEEL_CIRCUMFERENCE / TICKS_PAR_TOUR)
-#define PEN_OFFSET_MM 90.0
+#define PEN_OFFSET_MM 135.0    // distance axe roues → stylo, mesurée
 
 // Paramètres escalier (Séquence 1)
 #define STEP_WIDTH_MM 200.0
@@ -349,7 +349,7 @@ static void seq_avancer(float distanceMm) {
 static void seq_virerGauche() {
   const int   SPEED_IN  = 35;
   const int   SPEED_OUT = 150;
-  const float CIBLE     = -87.0f;
+  const float CIBLE     = -62.0f;  // 90° réels = 62° gyro (ratio 128/88)
 
   seq_resetGyro();
   avancerMoteurs(SPEED_IN, SPEED_OUT);
@@ -369,7 +369,7 @@ static void seq_virerGauche() {
 static void seq_virerDroit() {
   const int   SPEED_IN  = 35;
   const int   SPEED_OUT = 150;
-  const float CIBLE     = 87.0f;
+  const float CIBLE     = 62.0f;   // 90° réels = 62° gyro (ratio 128/88)
 
   seq_resetGyro();
   avancerMoteurs(SPEED_OUT, SPEED_IN);
@@ -425,7 +425,7 @@ String testDistance() {
 //   angle_enc (°) = (ticsD - ticsG) * MM_PAR_TICK / ENTRAXE_MM * (180/PI)
 String testAngle() {
   const int   SPEED = 130;
-  const float CIBLE = 88.0f;
+  const float CIBLE = 62.0f;  // 90° réels = 62° gyro (ratio 128/88)
 
   resetAutoEncoders();
   seq_resetGyro();
