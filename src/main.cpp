@@ -464,10 +464,10 @@ static void marquerPoint() {
 // TICKS_MARCHE : ticks roue droite (rapide) pour ~10cm de tracé stylo → à calibrer.
 // TICKS_CORRECT : ticks roue gauche (rapide) pour réaligner → à calibrer.
 // ==============================================================================
-#define SPEED_ARC_SLOW  90    // augmenté (50→90) : réduit la courbure de la marche
+#define SPEED_ARC_SLOW  125   // augmenté (90→125) : arc encore plus doux
 #define SPEED_ARC_FAST  150
 #define TICKS_MARCHE    200   // validé : 10cm de tracé ✅
-#define TICKS_CORRECT    20   // réduit (55→20) : correction douce, pas de pic visible
+#define TICKS_CORRECT    10   // réduit (20→10) : quasi imperceptible
 
 static void seq_marche() {
   // Arc gauche : roue gauche lente, roue droite rapide
