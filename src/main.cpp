@@ -14,7 +14,7 @@ WebServer server(80);
 // --- CONSTANTES PHYSIQUES DU ROBOT ---
 #define WHEEL_DIAMETER_MM 90.0
 #define WHEEL_CIRCUMFERENCE (WHEEL_DIAMETER_MM * PI)
-#define ENTRAXE_MM 135.0
+#define ENTRAXE_MM 82.0        // centre-à-centre : 77mm intérieur + 5mm demi-roue×2
 #define TICKS_PAR_TOUR 857.0   // calibré : 1000 ticks = 330mm réels (était 700)
 #define MM_PAR_TICK (WHEEL_CIRCUMFERENCE / TICKS_PAR_TOUR)
 #define PEN_OFFSET_MM 135.0    // distance axe roues → stylo, mesurée
@@ -342,20 +342,28 @@ static void seq_avancer(float distanceMm) {
   delay(300);
 }
 
-// Virage gauche ~90° en arc avant.
-// Roue gauche (intérieure) : SPEED_IN > 0 → pas de pivot sur place.
-// Roue droite (extérieure) : SPEED_OUT → arc serré.
-// Arrêt quand le gyro atteint CIBLE (90° gauche = angleZ négatif).
+// ==============================================================================
+// VIRAGES PAR ENCODEURS (pivot sur place, 90° exact)
+//
+// Formule : arc_roue = (π/2) × (ENTRAXE_MM/2) = π×ENTRAXE_MM/4
+// ticks_90 = arc_roue / MM_PAR_TICK
+// Avec ENTRAXE_MM=82, MM_PAR_TICK=π×90/857=0.330 → ticks_90 ≈ 195
+//
+// Pivot sur place : une roue avance, l'autre recule à vitesse identique.
+// → le stylo trace un point (pivot pur, pas d'arc).
+// ==============================================================================
+
+#define TICKS_90 195   // ticks par roue pour 90° exact (à affiner avec le test angle)
+#define SPEED_PIVOT 130
+
+// Pivot gauche 90° : G recule, D avance
 static void seq_virerGauche() {
-  const int   SPEED_IN  = 35;
-  const int   SPEED_OUT = 150;
-  const float CIBLE     = -60.0f;  // 90° réels = 60° gyro (ratio 56/84)
-
-  seq_resetGyro();
-  avancerMoteurs(SPEED_IN, SPEED_OUT);
-
-  while (angleZ > CIBLE) {
-    seq_majGyro();
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  // G arrière, D avant
+  analogWrite(PIN_IN1_G, 0);          analogWrite(PIN_IN2_G, SPEED_PIVOT);
+  analogWrite(PIN_IN1_D, 0);          analogWrite(PIN_IN2_D, SPEED_PIVOT);
+  while (autoTicsG < TICKS_90 && autoTicsD < TICKS_90) {
     server.handleClient();
     delay(5);
   }
@@ -363,19 +371,14 @@ static void seq_virerGauche() {
   delay(300);
 }
 
-// Virage droit ~90° en arc avant.
-// Roue droite (intérieure) : SPEED_IN > 0.
-// Arrêt quand le gyro atteint CIBLE (90° droite = angleZ positif).
+// Pivot droit 90° : G avance, D recule
 static void seq_virerDroit() {
-  const int   SPEED_IN  = 35;
-  const int   SPEED_OUT = 150;
-  const float CIBLE     = 60.0f;   // 90° réels = 60° gyro (ratio 56/84)
-
-  seq_resetGyro();
-  avancerMoteurs(SPEED_OUT, SPEED_IN);
-
-  while (angleZ < CIBLE) {
-    seq_majGyro();
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  // G avant, D arrière
+  analogWrite(PIN_IN1_G, SPEED_PIVOT); analogWrite(PIN_IN2_G, 0);
+  analogWrite(PIN_IN1_D, SPEED_PIVOT); analogWrite(PIN_IN2_D, 0);
+  while (autoTicsG < TICKS_90 && autoTicsD < TICKS_90) {
     server.handleClient();
     delay(5);
   }
@@ -399,37 +402,19 @@ String testDistance() {
   return msg;
 }
 
-// TEST ANGLE : effectue une rotation sur place vers la droite jusqu'à ce que
-// le gyroscope indique 90°. Mesurer le vrai angle au sol (rapporteur ou marquage).
-// Si le robot dépasse ou n'atteint pas 90° → ajuster SEUIL dans seq_virer*.
-// Les ticks G et D permettent de cross-checker via odométrie :
-//   angle_enc (°) = (ticsD - ticsG) * MM_PAR_TICK / ENTRAXE_MM * (180/PI)
+// TEST ANGLE : pivot sur place de TICKS_90 ticks (encodeurs purs, pas de gyro).
+// Mesurer le vrai angle au sol → si ≠ 90°, ajuster TICKS_90.
+// Règle : angle_reel < 90° → augmenter TICKS_90 ; angle_reel > 90° → diminuer.
 String testAngle() {
-  const int   SPEED = 130;
-  const float CIBLE = 60.0f;  // 90° réels = 60° gyro (ratio 56/84)
+  seq_virerDroit();   // réutilise exactement la même logique que la séquence
 
-  resetAutoEncoders();
-  seq_resetGyro();
+  float angleEnc = (autoTicsG + autoTicsD) * MM_PAR_TICK / ENTRAXE_MM * (180.0f / PI);
 
-  // Pivot sur place : G avant, D arrière
-  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
-  analogWrite(PIN_IN1_G, SPEED); analogWrite(PIN_IN2_G, 0);
-  analogWrite(PIN_IN1_D, SPEED); analogWrite(PIN_IN2_D, 0);
-
-  while (angleZ < CIBLE) {
-    seq_majGyro();
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-
-  float angleEnc = (autoTicsD + autoTicsG) * MM_PAR_TICK / ENTRAXE_MM * (180.0f / PI);
-
-  String msg = "TEST ANGLE | gyroZ=" + String(angleZ, 1) + "deg"
-             + " | ticsG=" + String(autoTicsG)
+  String msg = "TEST ANGLE encodeurs | ticsG=" + String(autoTicsG)
              + " ticsD=" + String(autoTicsD)
              + " | angle_enc=" + String(angleEnc, 1) + "deg"
-             + " | Mesurez le vrai angle et comparez.";
+             + " | TICKS_90=" + String(TICKS_90)
+             + " | Mesurez l'angle reel.";
   Serial.println(msg);
   return msg;
 }
