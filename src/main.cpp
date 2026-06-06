@@ -512,8 +512,8 @@ static void seq_arcDroit() {
 // G rapide, D lente (les deux en avant) → arc doux vers la droite
 // Arrêt sur ticks roue gauche (extérieure)
 #define SPEED_REPO_FAST  150
-#define SPEED_REPO_SLOW   40   // plus lente → arc plus serré
-#define TICKS_REPO       195   // calqué sur TICKS_MARCHE pour ~90° symétrique
+#define SPEED_REPO_SLOW   20   // très lente → arc très serré
+#define TICKS_REPO       250   // augmenté pour compenser la roue très lente
 
 static void seq_marche() {
   seq_arcGauche();   // segment 2 : arc serré gauche ~90°
