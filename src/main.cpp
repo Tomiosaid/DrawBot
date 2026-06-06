@@ -457,24 +457,51 @@ static void marquerPoint() {
 }
 
 // ==============================================================================
+// MARCHE : arc gauche doux → le stylo trace la "marche" (~10cm de tracé)
+//          puis petit arc droit de correction pour réaligner vers segment 3.
+//
+// Les deux roues avancent (pas de pivot) : L=lente, D=rapide → arc gauche.
+// TICKS_MARCHE : ticks roue droite (rapide) pour ~10cm de tracé stylo → à calibrer.
+// TICKS_CORRECT : ticks roue gauche (rapide) pour réaligner → à calibrer.
+// ==============================================================================
+#define SPEED_ARC_SLOW  50
+#define SPEED_ARC_FAST  150
+#define TICKS_MARCHE    200   // à calibrer : viser ~10cm de tracé stylo
+#define TICKS_CORRECT    55   // à calibrer : correction heading pour segment 3 droit
+
+static void seq_marche() {
+  // Arc gauche : roue gauche lente, roue droite rapide
+  resetAutoEncoders();
+  avancerMoteurs(SPEED_ARC_SLOW, SPEED_ARC_FAST);
+  while (autoTicsD < TICKS_MARCHE) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(250);
+
+  // Correction droite : roue gauche rapide, roue droite lente
+  resetAutoEncoders();
+  avancerMoteurs(SPEED_ARC_FAST, SPEED_ARC_SLOW);
+  while (autoTicsG < TICKS_CORRECT) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(250);
+}
+
+// ==============================================================================
 // SÉQUENCE 1 : ESCALIER
-// Géométrie : 20cm → virage gauche 90° → 10cm → virage droit 90° → 40cm
+// 20cm → marche (arc ~10cm) → correction → 40cm
 // ET1.1 : arêtes orthogonales au départ et à l'arrivée
-// ET1.2 : distances ±1cm (calibrées par encodeurs, TICKS_PAR_TOUR=857)
-// ET1.3 : angles ±5° (calibrés par encodeurs, TICKS_90=198)
+// ET1.2 : distances ±1cm (encodeurs, TICKS_PAR_TOUR=857)
+// ET1.3 : angles tolérés sur la marche (arc accepté)
 // ==============================================================================
 void drawStairs() {
   sequenceEnCours = true;
 
-  marquerPoint();            // ET1.1 : marquage départ
+  marquerPoint();        // ET1.1 : marquage départ
 
-  seq_avancer(200.0f);      // segment 1 : 20 cm
-  seq_virerGauche();        // virage gauche 90°
-  seq_avancer(100.0f);      // segment 2 : 10 cm (marche)
-  seq_virerDroit();         // virage droit 90°
-  seq_avancer(400.0f);      // segment 3 : 40 cm
+  seq_avancer(200.0f);  // segment 1 : 20 cm
+  seq_marche();         // marche : arc ~10cm + correction
+  seq_avancer(400.0f);  // segment 3 : 40 cm
 
-  marquerPoint();            // ET1.1 : marquage arrivée
+  marquerPoint();        // ET1.1 : marquage arrivée
 
   arreterMoteurs();
   sequenceEnCours = false;
