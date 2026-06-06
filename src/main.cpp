@@ -483,7 +483,8 @@ static void marquerPoint() {
 // ==============================================================================
 #define SPEED_ARC_OUT   150   // roue extérieure : avant
 #define SPEED_ARC_IN    50    // roue intérieure : arrière (marche arrière légère)
-#define TICKS_MARCHE    293   // ~10cm et ~90° théoriques (à calibrer)
+#define TICKS_MARCHE    195   // réduit de 1/3 (293→195)
+#define TICKS_CORRECT    30   // correction très légère pour réaligner segment 3
 
 // Arc gauche serré : G=intérieure (arrière), D=extérieure (avant)
 static void seq_arcGauche() {
@@ -508,8 +509,16 @@ static void seq_arcDroit() {
 }
 
 static void seq_marche() {
-  seq_arcGauche();   // segment 2 : arc serré gauche ~10cm ~90°
-  seq_arcDroit();    // correction  : arc serré droit ~90° → robot droit pour segment 3
+  seq_arcGauche();   // segment 2 : arc serré gauche
+
+  // Correction très légère droite pour réaligner cap segment 3
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, SPEED_ARC_OUT); analogWrite(PIN_IN2_G, 0);
+  analogWrite(PIN_IN1_D, SPEED_ARC_IN);  analogWrite(PIN_IN2_D, 0);
+  while (autoTicsG < TICKS_CORRECT) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(250);
 }
 
 // ==============================================================================
