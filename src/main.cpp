@@ -353,7 +353,7 @@ static void seq_avancer(float distanceMm) {
 // → le stylo trace un point (pivot pur, pas d'arc).
 // ==============================================================================
 
-#define TICKS_90 195   // ticks par roue pour 90° exact (à affiner avec le test angle)
+#define TICKS_90 176   // calibré : 195 ticks = 100° réels → 195×90/100 = 176
 #define SPEED_PIVOT 130
 
 // Pivot gauche 90° : G recule, D avance
