@@ -349,7 +349,7 @@ static void seq_avancer(float distanceMm) {
 static void seq_virerGauche() {
   const int   SPEED_IN  = 35;
   const int   SPEED_OUT = 150;
-  const float CIBLE     = -62.0f;  // 90° réels = 62° gyro (ratio 128/88)
+  const float CIBLE     = -56.0f;  // 90° réels = 56° gyro (ratio 62/100)
 
   seq_resetGyro();
   avancerMoteurs(SPEED_IN, SPEED_OUT);
@@ -369,7 +369,7 @@ static void seq_virerGauche() {
 static void seq_virerDroit() {
   const int   SPEED_IN  = 35;
   const int   SPEED_OUT = 150;
-  const float CIBLE     = 62.0f;   // 90° réels = 62° gyro (ratio 128/88)
+  const float CIBLE     = 56.0f;   // 90° réels = 56° gyro (ratio 62/100)
 
   seq_resetGyro();
   avancerMoteurs(SPEED_OUT, SPEED_IN);
@@ -387,33 +387,14 @@ static void seq_virerDroit() {
 // TESTS DE CALIBRATION
 // ==============================================================================
 
-// TEST DISTANCE : avance à vitesse fixe pendant N_TICKS ticks (roue gauche),
-// puis s'arrête. Mesurer la vraie distance au sol et comparer à la théorique.
-// Théorique = N_TICKS * MM_PAR_TICK
-// Si écart → ajuster TICKS_PAR_TOUR ou WHEEL_DIAMETER_MM.
+// TEST DISTANCE : avance de 40 cm via seq_avancer (encodeurs + correction).
+// Mesurer la vraie distance au sol pour vérifier la calibration.
 String testDistance() {
-  const long  N_TICKS    = 1000;          // nb de ticks cible (≈ 40 cm théorique)
-  const int   SPEED      = 150;
-
-  resetAutoEncoders();
-  angleZ = 0.0f;
-  seq_resetGyro();
-
-  avancerMoteurs(SPEED, SPEED);
-  while (autoTicsG < N_TICKS) {
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-
-  float distTheoriqueG = autoTicsG * MM_PAR_TICK;
-  float distTheoriqueD = autoTicsD * MM_PAR_TICK;
+  seq_avancer(400.0f);
 
   String msg = "TEST DIST | ticsG=" + String(autoTicsG)
              + " ticsD=" + String(autoTicsD)
-             + " | theoriqueG=" + String(distTheoriqueG, 1) + "mm"
-             + " | theoriqueD=" + String(distTheoriqueD, 1) + "mm"
-             + " | Mesurez la vraie distance et comparez.";
+             + " | Cible=400mm — mesurez la vraie distance.";
   Serial.println(msg);
   return msg;
 }
@@ -425,7 +406,7 @@ String testDistance() {
 //   angle_enc (°) = (ticsD - ticsG) * MM_PAR_TICK / ENTRAXE_MM * (180/PI)
 String testAngle() {
   const int   SPEED = 130;
-  const float CIBLE = 62.0f;  // 90° réels = 62° gyro (ratio 128/88)
+  const float CIBLE = 56.0f;  // 90° réels = 56° gyro (ratio 62/100)
 
   resetAutoEncoders();
   seq_resetGyro();
