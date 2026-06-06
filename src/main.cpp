@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_LSM6DS3.h>
@@ -293,111 +295,106 @@ void ATTENDREREPOS() {
 }
 
 // ==============================================================================
-// SÉQUENCE 1 : ESCALIER — logique arc asymétrique (d'après Sequences.cpp)
+// SÉQUENCE 1 : ESCALIER
+// 20 cm → virage gauche 90° → 10 cm → virage droit 90° → 40 cm
+// Toutes les fonctions sont bloquantes (busy-wait).
+// Virages : arc avant (roue intérieure positive = pas de pivot sur place).
+// Angles   : gyroscope (convention : gauche → angleZ négatif).
+// Distances: encodeurs, correction proportionnelle pour tenir la ligne droite.
 // ==============================================================================
-//
-// Les virages à 90° sont exécutés par arcs PWM asymétriques contrôlés
-// par la distance encodeur, en 3 phases (amorce / correction / fin).
-// Pas de recul ni de pivot sur place : le tracé est continu.
-//
-// Escalier : 20cm → virage gauche 90° → 10cm → virage droit 90° → 40cm
-//
-// Seuils de distance scalés depuis la référence (ENTRAXE_REF=83mm → 135mm,
-// facteur ×1.627). À affiner sur le robot réel.
-//
 
-// --- Virage gauche 90° par arc asymétrique ---
-static void arcGauche90() {
-  // Phase 1 : amorce — roue gauche lente, roue droite rapide
+// Remet à zéro l'intégration gyro et l'horodatage
+static void seq_resetGyro() {
+  angleZ = 0.0f;
+  lastGyroTime = millis();
+}
+
+// Lit le gyro et intègre l'angle (à appeler en boucle rapide)
+static void seq_majGyro() {
+  sensors_event_t a, g, t;
+  lsm6ds3.getEvent(&a, &g, &t);
+  unsigned long now = millis();
+  float dt = (now - lastGyroTime) / 1000.0f;
+  if (dt > 0.1f) dt = 0.1f;   // cap pour éviter saut si interruption longue
+  lastGyroTime = now;
+  angleZ += g.gyro.z * (180.0f / PI) * dt;
+}
+
+// Avance en ligne droite sur distanceMm (mm).
+// Correction P sur le différentiel d'encodeurs pour compenser la dérive.
+// STOP_THRESHOLD : distance d'anticipation pour absorber l'inertie (à calibrer).
+static void seq_avancer(float distanceMm) {
   resetAutoEncoders();
-  avancerMoteurs(29, 155);
-  while (getAutoAverageDistance() < 68.0) {
-    updateEtatRobot(); server.handleClient(); delay(10);
-  }
 
-  // Phase 2 : correction — inversion des rôles
-  resetAutoEncoders();
-  avancerMoteurs(155, 35);
-  while (getAutoAverageDistance() < 96.0) {
-    updateEtatRobot(); server.handleClient(); delay(10);
-  }
+  const float STOP_THRESHOLD = 15.0f;  // mm — à ajuster selon la vitesse/inertie réelle
+  const int   BASE_SPEED     = 150;
+  const int   KP_DIR         = 2;
 
-  // Phase 3 : fin du virage
-  delay(100);
-  avancerMoteurs(165, 55);
-  while (getAutoAverageDistance() < 114.0) {
-    updateEtatRobot(); server.handleClient(); delay(10);
+  while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
+    int diff       = (int)(autoTicsG - autoTicsD);
+    int leftSpeed  = constrain(BASE_SPEED - KP_DIR * diff, 80, 255);
+    int rightSpeed = constrain(BASE_SPEED + KP_DIR * diff, 80, 255);
+    avancerMoteurs(leftSpeed, rightSpeed);
+    server.handleClient();
+    delay(10);
   }
-
-  // Arrêt complet + stabilisation avant le prochain segment droit
   arreterMoteurs();
-  currentState = REPOS;
-  integralDir = 0;
-  lastErrorDir = 0;
-  integralDist = 0;
   delay(300);
 }
 
-// --- Virage droit 90° par arc asymétrique ---
-// Seuils réduits de moitié par rapport au gauche : le moteur droit est plus puissant
-// et l'arc atteignait ~180° avec les mêmes valeurs.
-static void arcDroit90() {
-  // Phase 1 : amorce — roue gauche rapide, roue droite lente
-  resetAutoEncoders();
-  avancerMoteurs(165, 29);
-  while (getAutoAverageDistance() < 34.0) {
-    server.handleClient(); delay(10);
-  }
+// Virage gauche ~90° en arc avant.
+// Roue gauche (intérieure) : SPEED_IN > 0 → pas de pivot sur place.
+// Roue droite (extérieure) : SPEED_OUT → arc serré.
+// Arrêt quand le gyro atteint CIBLE (90° gauche = angleZ négatif).
+static void seq_virerGauche() {
+  const int   SPEED_IN  = 35;
+  const int   SPEED_OUT = 150;
+  const float CIBLE     = -87.0f;
 
-  // Phase 2 : correction
-  resetAutoEncoders();
-  avancerMoteurs(35, 165);
-  while (getAutoAverageDistance() < 48.0) {
-    server.handleClient(); delay(10);
-  }
+  seq_resetGyro();
+  avancerMoteurs(SPEED_IN, SPEED_OUT);
 
-  // Phase 3 : fin du virage
-  delay(100);
-  avancerMoteurs(55, 175);
-  while (getAutoAverageDistance() < 57.0) {
-    server.handleClient(); delay(10);
+  while (angleZ > CIBLE) {
+    seq_majGyro();
+    server.handleClient();
+    delay(5);
   }
-
-  // Arrêt complet + purge des intégrales PID
   arreterMoteurs();
-  currentState = REPOS;
-  integralDir = 0;
-  lastErrorDir = 0;
-  integralDist = 0;
-  delay(400);
+  delay(300);
+}
+
+// Virage droit ~90° en arc avant.
+// Roue droite (intérieure) : SPEED_IN > 0.
+// Arrêt quand le gyro atteint CIBLE (90° droite = angleZ positif).
+static void seq_virerDroit() {
+  const int   SPEED_IN  = 35;
+  const int   SPEED_OUT = 150;
+  const float CIBLE     = 87.0f;
+
+  seq_resetGyro();
+  avancerMoteurs(SPEED_OUT, SPEED_IN);
+
+  while (angleZ < CIBLE) {
+    seq_majGyro();
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(300);
 }
 
 void drawStairs() {
   sequenceEnCours = true;
 
-  // === SEGMENT 1 : 20cm horizontal ===
-  moveDistance(200.0);
-  ATTENDREREPOS();
-  delay(500);
+  delay(800);               // stylo posé au repos → point de départ visible (ET1.1)
 
-  // === VIRAGE GAUCHE 90° (vers le haut) ===
-  arcGauche90();
+  seq_avancer(200.0f);      // segment 1 : 20 cm
+  seq_virerGauche();        // virage gauche 90°
+  seq_avancer(100.0f);      // segment 2 : 10 cm (marche)
+  seq_virerDroit();         // virage droit 90°
+  seq_avancer(400.0f);      // segment 3 : 40 cm
 
-  // === SEGMENT 2 : 10cm vertical ===
-  // L'arc trace déjà ~3cm dans la nouvelle direction → on réduit en conséquence
-  moveDistance(65.0);
-  delay(200);
-  ATTENDREREPOS();
-  delay(500);
-
-  // === VIRAGE DROIT 90° (reprendre l'horizontale) ===
-  arcDroit90();
-
-  // === SEGMENT 3 : 40cm horizontal ===
-  moveDistance(400.0);
-  delay(200);
-  ATTENDREREPOS();
-
+  delay(800);               // stylo posé au repos → point d'arrivée visible (ET1.1)
   arreterMoteurs();
   sequenceEnCours = false;
 }
@@ -681,6 +678,7 @@ void handleStop() {
 // INITIALISATION
 // ==============================================================================
 void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // Désactive le brownout detector
   Serial.begin(115200);
 
   pinMode(PIN_EN_D, OUTPUT); pinMode(PIN_IN1_D, OUTPUT); pinMode(PIN_IN2_D, OUTPUT);
