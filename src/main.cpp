@@ -473,32 +473,43 @@ static void marquerPoint() {
 // SPEED_ARC_SLOW à ajuster pour rendre l'arc plus ou moins serré visuellement.
 // ==============================================================================
 // ==============================================================================
-// MARCHE : un seul arc gauche jusqu'à 90° (différentiel encodeurs),
-// puis toute petite correction droite pour réaligner le segment 3.
+// ARCS SERRÉS : roue intérieure en MARCHE ARRIÈRE légère + roue extérieure en avant.
 //
-// Angle contrôlé par : diff = ticsD - ticsG = DIFF_TICKS_90 = 390
-// Courbure visuelle réglée par SPEED_ARC_SLOW (plus proche de FAST = arc plus doux)
-// TICKS_CORRECT : correction mini après l'arc (ajuster si segment 3 pas droit)
+// Calcul : avec inner=-50 et outer=+150, l'effet de rotation est
+//   proportionnel à (150+50)=200, et la vitesse linéaire à (150-50)/2=50.
+//   Pour 90° : outer_ticks = (π/2 × 82 / 0.330) × (150/200) ≈ 293 ticks ≈ 10cm ✓
+//
+// TICKS_MARCHE : ticks roue extérieure pour ~10cm et ~90° (à calibrer)
 // ==============================================================================
-#define SPEED_ARC_SLOW  120   // proche de FAST → arc doux, grand rayon
-#define SPEED_ARC_FAST  150
-#define DIFF_TICKS_90   390   // (π/2 × 82) / 0.330 → 90° de rotation
-#define TICKS_CORRECT    10   // correction douce après l'arc
+#define SPEED_ARC_OUT   150   // roue extérieure : avant
+#define SPEED_ARC_IN    50    // roue intérieure : arrière (marche arrière légère)
+#define TICKS_MARCHE    293   // ~10cm et ~90° théoriques (à calibrer)
+
+// Arc gauche serré : G=intérieure (arrière), D=extérieure (avant)
+static void seq_arcGauche() {
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, 0);            analogWrite(PIN_IN2_G, SPEED_ARC_IN);   // G arrière
+  analogWrite(PIN_IN1_D, 0);            analogWrite(PIN_IN2_D, SPEED_ARC_OUT);  // D avant
+  while (autoTicsD < TICKS_MARCHE) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(250);
+}
+
+// Arc droit serré (correction) : G=extérieure (avant), D=intérieure (arrière)
+static void seq_arcDroit() {
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, SPEED_ARC_OUT); analogWrite(PIN_IN2_G, 0);            // G avant
+  analogWrite(PIN_IN1_D, SPEED_ARC_IN);  analogWrite(PIN_IN2_D, 0);            // D arrière
+  while (autoTicsG < TICKS_MARCHE) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(250);
+}
 
 static void seq_marche() {
-  // Arc gauche 90° : G lente, D rapide, arrêt sur différentiel
-  resetAutoEncoders();
-  avancerMoteurs(SPEED_ARC_SLOW, SPEED_ARC_FAST);
-  while ((autoTicsD - autoTicsG) < DIFF_TICKS_90) { server.handleClient(); delay(5); }
-  arreterMoteurs();
-  delay(250);
-
-  // Correction droite mini pour réaligner cap segment 3
-  resetAutoEncoders();
-  avancerMoteurs(SPEED_ARC_FAST, SPEED_ARC_SLOW);
-  while ((autoTicsG - autoTicsD) < TICKS_CORRECT) { server.handleClient(); delay(5); }
-  arreterMoteurs();
-  delay(250);
+  seq_arcGauche();   // segment 2 : arc serré gauche ~10cm ~90°
+  seq_arcDroit();    // correction  : arc serré droit ~90° → robot droit pour segment 3
 }
 
 // ==============================================================================
