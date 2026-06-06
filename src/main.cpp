@@ -508,15 +508,20 @@ static void seq_arcDroit() {
   delay(250);
 }
 
-static void seq_marche() {
-  seq_arcGauche();   // segment 2 : arc serré gauche
+// Repositionnement actif : avance en tournant doucement à droite
+// G rapide, D lente (les deux en avant) → arc doux vers la droite
+// Arrêt sur ticks roue gauche (extérieure)
+#define SPEED_REPO_FAST  150
+#define SPEED_REPO_SLOW   80
+#define TICKS_REPO        80   // à calibrer : viser ~90° de cap récupéré
 
-  // Correction très légère droite pour réaligner cap segment 3
+static void seq_marche() {
+  seq_arcGauche();   // segment 2 : arc serré gauche ~90°
+
+  // Repositionnement actif : avance en arc doux vers la droite
   resetAutoEncoders();
-  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
-  analogWrite(PIN_IN1_G, SPEED_ARC_OUT); analogWrite(PIN_IN2_G, 0);
-  analogWrite(PIN_IN1_D, SPEED_ARC_IN);  analogWrite(PIN_IN2_D, 0);
-  while (autoTicsG < TICKS_CORRECT) { server.handleClient(); delay(5); }
+  avancerMoteurs(SPEED_REPO_FAST, SPEED_REPO_SLOW);
+  while (autoTicsG < TICKS_REPO) { server.handleClient(); delay(5); }
   arreterMoteurs();
   delay(250);
 }
