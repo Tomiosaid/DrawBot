@@ -464,25 +464,38 @@ static void marquerPoint() {
 // TICKS_MARCHE : ticks roue droite (rapide) pour ~10cm de tracé stylo → à calibrer.
 // TICKS_CORRECT : ticks roue gauche (rapide) pour réaligner → à calibrer.
 // ==============================================================================
-#define SPEED_ARC_SLOW  125   // augmenté (90→125) : arc encore plus doux
+// ==============================================================================
+// MARCHE : arc gauche 90° + avancer 10cm + arc droit 90°
+// Les deux roues avancent (pas de pivot), arrêt par différentiel d'encodeurs.
+// Formule : diff_ticks_90 = (π/2 × ENTRAXE_MM) / MM_PAR_TICK = 390 ticks
+// Arc gauche : G lente, D rapide → diff = ticsD - ticsG
+// Arc droit  : G rapide, D lente → diff = ticsG - ticsD
+// SPEED_ARC_SLOW à ajuster pour rendre l'arc plus ou moins serré visuellement.
+// ==============================================================================
+#define SPEED_ARC_SLOW   80
 #define SPEED_ARC_FAST  150
-#define TICKS_MARCHE    200   // validé : 10cm de tracé ✅
-#define TICKS_CORRECT    10   // réduit (20→10) : quasi imperceptible
+#define DIFF_TICKS_90   390   // (π/2 × 82) / 0.330
 
-static void seq_marche() {
-  // Arc gauche : roue gauche lente, roue droite rapide
+static void seq_arcGauche90() {
   resetAutoEncoders();
   avancerMoteurs(SPEED_ARC_SLOW, SPEED_ARC_FAST);
-  while (autoTicsD < TICKS_MARCHE) { server.handleClient(); delay(5); }
+  while ((autoTicsD - autoTicsG) < DIFF_TICKS_90) { server.handleClient(); delay(5); }
   arreterMoteurs();
   delay(250);
+}
 
-  // Correction droite : roue gauche rapide, roue droite lente
+static void seq_arcDroit90() {
   resetAutoEncoders();
   avancerMoteurs(SPEED_ARC_FAST, SPEED_ARC_SLOW);
-  while (autoTicsG < TICKS_CORRECT) { server.handleClient(); delay(5); }
+  while ((autoTicsG - autoTicsD) < DIFF_TICKS_90) { server.handleClient(); delay(5); }
   arreterMoteurs();
   delay(250);
+}
+
+static void seq_marche() {
+  seq_arcGauche90();       // virage gauche 90° en arc
+  seq_avancer(100.0f);     // marche 10cm droite
+  seq_arcDroit90();        // virage droit 90° en arc
 }
 
 // ==============================================================================
