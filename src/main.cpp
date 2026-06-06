@@ -419,10 +419,54 @@ String testAngle() {
   return msg;
 }
 
+// ==============================================================================
+// MARQUAGE DÉPART / ARRIVÉE — arêtes orthogonales (ET1.1)
+// Petit pivot gauche ~20° + retour + petit pivot droit ~20° + retour
+// TICKS_20 = 198 × 20/90 = 44 ticks
+// ==============================================================================
+#define TICKS_20 44
+
+static void seq_pivotPetitGauche() {
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, 0);           analogWrite(PIN_IN2_G, SPEED_PIVOT);
+  analogWrite(PIN_IN1_D, 0);           analogWrite(PIN_IN2_D, SPEED_PIVOT);
+  while (autoTicsG < TICKS_20 && autoTicsD < TICKS_20) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(150);
+}
+
+static void seq_pivotPetitDroit() {
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, SPEED_PIVOT); analogWrite(PIN_IN2_G, 0);
+  analogWrite(PIN_IN1_D, SPEED_PIVOT); analogWrite(PIN_IN2_D, 0);
+  while (autoTicsG < TICKS_20 && autoTicsD < TICKS_20) { server.handleClient(); delay(5); }
+  arreterMoteurs();
+  delay(150);
+}
+
+static void marquerPoint() {
+  // gauche 20° → retour droit 20° → droit 20° → retour gauche 20°
+  // résultat : trait en croix orthogonal, robot revient à l'orientation de départ
+  seq_pivotPetitGauche();
+  seq_pivotPetitDroit();
+  seq_pivotPetitDroit();
+  seq_pivotPetitGauche();
+  delay(200);
+}
+
+// ==============================================================================
+// SÉQUENCE 1 : ESCALIER
+// Géométrie : 20cm → virage gauche 90° → 10cm → virage droit 90° → 40cm
+// ET1.1 : arêtes orthogonales au départ et à l'arrivée
+// ET1.2 : distances ±1cm (calibrées par encodeurs, TICKS_PAR_TOUR=857)
+// ET1.3 : angles ±5° (calibrés par encodeurs, TICKS_90=198)
+// ==============================================================================
 void drawStairs() {
   sequenceEnCours = true;
 
-  delay(800);               // stylo posé au repos → point de départ visible (ET1.1)
+  marquerPoint();            // ET1.1 : marquage départ
 
   seq_avancer(200.0f);      // segment 1 : 20 cm
   seq_virerGauche();        // virage gauche 90°
@@ -430,7 +474,8 @@ void drawStairs() {
   seq_virerDroit();         // virage droit 90°
   seq_avancer(400.0f);      // segment 3 : 40 cm
 
-  delay(800);               // stylo posé au repos → point d'arrivée visible (ET1.1)
+  marquerPoint();            // ET1.1 : marquage arrivée
+
   arreterMoteurs();
   sequenceEnCours = false;
 }
