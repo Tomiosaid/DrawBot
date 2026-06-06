@@ -383,6 +383,76 @@ static void seq_virerDroit() {
   delay(300);
 }
 
+// ==============================================================================
+// TESTS DE CALIBRATION
+// ==============================================================================
+
+// TEST DISTANCE : avance à vitesse fixe pendant N_TICKS ticks (roue gauche),
+// puis s'arrête. Mesurer la vraie distance au sol et comparer à la théorique.
+// Théorique = N_TICKS * MM_PAR_TICK
+// Si écart → ajuster TICKS_PAR_TOUR ou WHEEL_DIAMETER_MM.
+String testDistance() {
+  const long  N_TICKS    = 1000;          // nb de ticks cible (≈ 40 cm théorique)
+  const int   SPEED      = 150;
+
+  resetAutoEncoders();
+  angleZ = 0.0f;
+  seq_resetGyro();
+
+  avancerMoteurs(SPEED, SPEED);
+  while (autoTicsG < N_TICKS) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+
+  float distTheoriqueG = autoTicsG * MM_PAR_TICK;
+  float distTheoriqueD = autoTicsD * MM_PAR_TICK;
+
+  String msg = "TEST DIST | ticsG=" + String(autoTicsG)
+             + " ticsD=" + String(autoTicsD)
+             + " | theoriqueG=" + String(distTheoriqueG, 1) + "mm"
+             + " | theoriqueD=" + String(distTheoriqueD, 1) + "mm"
+             + " | Mesurez la vraie distance et comparez.";
+  Serial.println(msg);
+  return msg;
+}
+
+// TEST ANGLE : effectue une rotation sur place vers la droite jusqu'à ce que
+// le gyroscope indique 90°. Mesurer le vrai angle au sol (rapporteur ou marquage).
+// Si le robot dépasse ou n'atteint pas 90° → ajuster SEUIL dans seq_virer*.
+// Les ticks G et D permettent de cross-checker via odométrie :
+//   angle_enc (°) = (ticsD - ticsG) * MM_PAR_TICK / ENTRAXE_MM * (180/PI)
+String testAngle() {
+  const int   SPEED = 130;
+  const float CIBLE = 88.0f;
+
+  resetAutoEncoders();
+  seq_resetGyro();
+
+  // Pivot sur place : G avant, D arrière
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, SPEED); analogWrite(PIN_IN2_G, 0);
+  analogWrite(PIN_IN1_D, SPEED); analogWrite(PIN_IN2_D, 0);
+
+  while (angleZ < CIBLE) {
+    seq_majGyro();
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+
+  float angleEnc = (autoTicsD + autoTicsG) * MM_PAR_TICK / ENTRAXE_MM * (180.0f / PI);
+
+  String msg = "TEST ANGLE | gyroZ=" + String(angleZ, 1) + "deg"
+             + " | ticsG=" + String(autoTicsG)
+             + " ticsD=" + String(autoTicsD)
+             + " | angle_enc=" + String(angleEnc, 1) + "deg"
+             + " | Mesurez le vrai angle et comparez.";
+  Serial.println(msg);
+  return msg;
+}
+
 void drawStairs() {
   sequenceEnCours = true;
 
@@ -465,6 +535,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="sequence-section">
         <h3>Séquences de dessin</h3>
         <button class="btn-sequence" onclick="lancerSequence(1)">Séquence 1 - Escalier</button>
+        <hr style="margin:15px 0; border-color:#eee;">
+        <b style="color:#555; font-size:14px;">Calibration</b><br>
+        <button class="btn-sequence" style="background:#e67e22;" onclick="lancerTest('distance')">Test Distance (1000 ticks)</button>
+        <button class="btn-sequence" style="background:#8e44ad;" onclick="lancerTest('angle')">Test Angle (90° pivot)</button>
         <div id="seq-status" style="margin-top:10px; font-style:italic; color:#555;"></div>
     </div>
 
@@ -563,6 +637,15 @@ const char index_html[] PROGMEM = R"rawliteral(
             log("Lancement séquence " + num, "tx");
             fetch('/sequence' + num).then(res => res.text()).then(text => {
                 log("Réponse: " + text, "rx");
+                document.getElementById('seq-status').innerText = text;
+            });
+        }
+
+        function lancerTest(type) {
+            document.getElementById('seq-status').innerText = "Test " + type + " en cours...";
+            log("Lancement test " + type, "tx");
+            fetch('/test?t=' + type).then(res => res.text()).then(text => {
+                log("Résultat: " + text, "rx");
                 document.getElementById('seq-status').innerText = text;
             });
         }
@@ -666,6 +749,33 @@ void handleSequence1() {
   drawStairs();
 }
 
+void handleTest() {
+  if (sequenceEnCours) {
+    server.send(409, "text/plain", "Séquence déjà en cours");
+    return;
+  }
+  if (!server.hasArg("t")) {
+    server.send(400, "text/plain", "Paramètre t manquant");
+    return;
+  }
+  String type = server.arg("t");
+  sequenceEnCours = true;
+  String result;
+  if (type == "distance") {
+    server.send(200, "text/plain", "Test distance lancé...");
+    result = testDistance();
+  } else if (type == "angle") {
+    server.send(200, "text/plain", "Test angle lancé...");
+    result = testAngle();
+  } else {
+    server.send(400, "text/plain", "Type inconnu");
+    sequenceEnCours = false;
+    return;
+  }
+  sequenceEnCours = false;
+  Serial.println(result);
+}
+
 void handleStop() {
   arreterMoteurs();
   currentState = REPOS;
@@ -698,6 +808,7 @@ void setup() {
   server.on("/action", handleAction);
   server.on("/telemetry", handleTelemetry);
   server.on("/sequence1", handleSequence1);
+  server.on("/test", handleTest);
   server.on("/stop", handleStop);
   server.begin();
 
