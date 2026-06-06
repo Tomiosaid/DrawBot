@@ -512,8 +512,8 @@ static void seq_arcDroit() {
 // G rapide, D lente (les deux en avant) → arc doux vers la droite
 // Arrêt sur ticks roue gauche (extérieure)
 #define SPEED_REPO_FAST  150
-#define SPEED_REPO_SLOW   60
-#define TICKS_REPO       195   // augmenté (120→195) : robot pas assez réaligné
+#define SPEED_REPO_SLOW   30   // baissé (60→30) : arc plus serré = plus d'angle
+#define TICKS_REPO       120   // longueur de la correction
 
 static void seq_marche() {
   seq_arcGauche();   // segment 2 : arc serré gauche ~90°
