@@ -326,7 +326,7 @@ static void seq_majGyro() {
 static void seq_avancer(float distanceMm) {
   resetAutoEncoders();
 
-  const float STOP_THRESHOLD = 15.0f;  // mm — à ajuster selon la vitesse/inertie réelle
+  const float STOP_THRESHOLD = -10.0f; // négatif = dépasse la cible encodeur, inertie quasi nulle
   const int   BASE_SPEED     = 150;
   const int   KP_DIR         = 2;
 
@@ -349,7 +349,7 @@ static void seq_avancer(float distanceMm) {
 static void seq_virerGauche() {
   const int   SPEED_IN  = 35;
   const int   SPEED_OUT = 150;
-  const float CIBLE     = -56.0f;  // 90° réels = 56° gyro (ratio 62/100)
+  const float CIBLE     = -60.0f;  // 90° réels = 60° gyro (ratio 56/84)
 
   seq_resetGyro();
   avancerMoteurs(SPEED_IN, SPEED_OUT);
@@ -369,7 +369,7 @@ static void seq_virerGauche() {
 static void seq_virerDroit() {
   const int   SPEED_IN  = 35;
   const int   SPEED_OUT = 150;
-  const float CIBLE     = 56.0f;   // 90° réels = 56° gyro (ratio 62/100)
+  const float CIBLE     = 60.0f;   // 90° réels = 60° gyro (ratio 56/84)
 
   seq_resetGyro();
   avancerMoteurs(SPEED_OUT, SPEED_IN);
@@ -406,7 +406,7 @@ String testDistance() {
 //   angle_enc (°) = (ticsD - ticsG) * MM_PAR_TICK / ENTRAXE_MM * (180/PI)
 String testAngle() {
   const int   SPEED = 130;
-  const float CIBLE = 56.0f;  // 90° réels = 56° gyro (ratio 62/100)
+  const float CIBLE = 60.0f;  // 90° réels = 60° gyro (ratio 56/84)
 
   resetAutoEncoders();
   seq_resetGyro();
