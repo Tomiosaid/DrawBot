@@ -628,9 +628,9 @@ static void seq_pivotAngleDroit(float angleDeg) {
 // ==============================================================================
 #define FLECHE_HAMPE_MM   40.0f
 #define ZIG_BASE_SPEED    120        // vitesse de base pendant la tête
-#define ZIG_DIFF_MAX      55         // différentiel max (base du triangle)
-#define ZIG_LEVELS        6          // nombre de niveaux
-#define ZIG_DIST_MM       7.0f       // distance par demi-oscillation (mm)
+#define ZIG_DIFF_MAX      10         // différentiel très faible → zigzags très aigus
+#define ZIG_LEVELS        6          // 6 niveaux
+#define ZIG_DIST_MM       5.0f       // 5mm par demi-oscillation
 
 // Avance d'une courbe : roue gauche à leftPWM, droite à rightPWM, sur distMm
 static void seq_courbe(float distMm, int leftPWM, int rightPWM) {
