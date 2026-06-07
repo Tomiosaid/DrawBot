@@ -625,9 +625,9 @@ static void seq_pivotAngleDroit(float angleDeg) {
 //       G 65° → D 130° → G 65° — retour face Nord
 // ==============================================================================
 #define FLECHE_HAMPE_MM      40.0f
-#define FLECHE_RECUL_MM      10.0f
-#define FLECHE_ARC_PETIT     20.0f  // demi-angle du petit arc (pointe)
-#define FLECHE_ARC_GRAND     65.0f  // demi-angle du grand arc (fermeture)
+#define FLECHE_RECUL_MM      20.0f  // recul entre les deux arcs
+#define FLECHE_ARC_PETIT     35.0f  // demi-angle du petit arc (pointe)
+#define FLECHE_ARC_GRAND     55.0f  // demi-angle du grand arc — plus large pour fermer
 
 static void seq_flecheNord() {
   seq_resetGyro();
