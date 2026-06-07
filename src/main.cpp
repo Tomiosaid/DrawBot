@@ -818,6 +818,116 @@ void drawStairs() {
 }
 
 // ==============================================================================
+// SÉQUENCE 2 : CERCLE  (logique reprise du projet de l'équipe)
+//
+// CHANGEMENT CLÉ vs l'ancienne version :
+//   La FERMETURE du cercle n'est plus mesurée au gyroscope (qui dérive et finit
+//   par ne plus se refermer) mais par la DIFFÉRENCE des encodeurs G/D.
+//   Quand le robot a tourné de 360°, l'écart (autoTicsG - autoTicsD) atteint une
+//   valeur FIXE, indépendante du rayon :
+//
+//        cible_diff_tics = entraxe * 2*PI / mm_par_tick
+//
+//   Tant que |autoTicsG - autoTicsD| < cible, on trace ; ensuite on ferme.
+//   -> insensible à la dérive, fermeture garantie à 360°.
+//
+// GÉOMÉTRIE (stylo déporté ~13 cm en avant de l'axe des roues) :
+//        Rc    = sqrt(rayon_stylo^2 - D_PEN^2)      (rayon du centre des roues)
+//        ratio = (Rc + E/2) / (Rc - E/2)            (rapport des vitesses)
+//   Roue extérieure (gauche) à PWM fixe ; roue intérieure (droite) asservie par
+//   un correcteur proportionnel (Kp) pour tenir ce ratio.
+//
+// NB CALIBRATION : la cible de fermeture est calculée à partir de TES constantes
+//   (ENTRAXE_MM, MM_PAR_TICK -> 857 ticks/tour). Les petites corrections par
+//   rayon ci-dessous ont été calées sur le robot de l'équipe : à réajuster au besoin.
+// ==============================================================================
+
+#define CERCLE_SEUIL_PIVOT 15.0f   // conservé : utilisé par handleSequence2 (message d'état)
+
+void executerCercle(float rayon_stylo_cm) {
+  sequenceEnCours = true;
+
+  // --- Constantes géométriques (reprises du projet de l'équipe) ---
+  const float D_PEN         = 13.0f;   // déport stylo (cm) en avant de l'axe des roues
+  const float ENTRAXE_RAYON = 9.0f;    // entraxe (cm) utilisé pour le ratio des vitesses
+
+  Serial.println("\n=== NOUVEAU CERCLE DEMANDE ===");
+  Serial.print("Rayon recu : "); Serial.println(rayon_stylo_cm);
+
+  // --- Bouclier anti-crash : évite la racine carrée négative (rayon trop petit) ---
+  if (rayon_stylo_cm <= D_PEN) {
+    Serial.println("Alerte: rayon trop petit -> forcage a 13.5 cm");
+    rayon_stylo_cm = 13.5f;
+  }
+  float vraie_demande = rayon_stylo_cm;
+
+  // --- Corrections empiriques par rayon (calées sur le robot de l'équipe) ---
+  if (vraie_demande == 16.0f) rayon_stylo_cm = vraie_demande - 0.2f;
+  if (vraie_demande == 17.0f) rayon_stylo_cm = vraie_demande + 0.25f;
+  if (vraie_demande == 18.0f) rayon_stylo_cm = vraie_demande + 0.5f;
+  if (vraie_demande == 20.0f) rayon_stylo_cm = vraie_demande + 1.2f;
+  else if (vraie_demande == 19.0f) rayon_stylo_cm = vraie_demande + 0.65f;
+
+  // --- Géométrie du tracé ---
+  float Rc    = sqrt(pow(rayon_stylo_cm, 2) - pow(D_PEN, 2));      // rayon du centre des roues
+  float ratio = (Rc + (ENTRAXE_RAYON / 2.0f)) / (Rc - (ENTRAXE_RAYON / 2.0f));
+
+  // --- Cible de fermeture : écart de ticks pour 360°, calibré sur CE robot ---
+  // (autoTicsG - autoTicsD) = entraxe * angle(rad) / mm_par_tick ; pour 360° ci-dessous.
+  // Si le cercle se referme un peu trop tôt/tard, ajuste ce facteur (1.0 = théorique).
+  const float CERCLE_FERMETURE_FACTEUR = 1.0f;
+  long cible_diff_tics = (long)(CERCLE_FERMETURE_FACTEUR * ENTRAXE_MM * 2.0f * PI / MM_PAR_TICK);
+
+  // --- Vitesses moteurs (roue extérieure fixe, intérieure asservie) ---
+  int pwmExtBase = 170;   // roue extérieure (gauche)
+  int ajuste     = 30;    // PWM minimal de la roue intérieure (droite)
+  if (rayon_stylo_cm <= 14) { pwmExtBase = 230; ajuste = 20; Serial.println("!!! MODE PIVOT EXTREME !!!"); }
+  if (rayon_stylo_cm <= 15) { pwmExtBase = 220; ajuste = 28; Serial.println("!!! MODE PIVOT EXTREME !!!"); }
+  float Kp = 1.9f;        // gain du correcteur de la roue intérieure
+
+  resetAutoEncoders();
+  Serial.print("Cible de difference de ticks : "); Serial.println(cible_diff_tics);
+  Serial.print("Rc=");      Serial.print(Rc, 2);
+  Serial.print(" ratio="); Serial.println(ratio, 2);
+  Serial.println("--- DEPART MOTEURS ---");
+
+  // --- Boucle de tracé : on tourne jusqu'à 360° (écart d'encodeurs atteint) ---
+  unsigned long chronoReseau = millis();
+  while (abs(autoTicsG - autoTicsD) < cible_diff_tics) {
+    // On n'interroge le Wi-Fi que toutes les 50 ms (sinon ça hache le tracé)
+    if (millis() - chronoReseau > 50) {
+      server.handleClient();
+      chronoReseau = millis();
+    }
+    if (!sequenceEnCours) {            // STOP envoyé depuis l'interface web
+      Serial.println("!!! ARRET D'URGENCE VIA WIFI !!!");
+      break;
+    }
+
+    // Asservissement proportionnel de la roue intérieure pour tenir le ratio
+    float tics_D_cible  = autoTicsG / ratio;
+    float erreur        = tics_D_cible - (float)autoTicsD;
+    int   pwmInt_Ajuste = (pwmExtBase / ratio) + (Kp * erreur);
+    pwmInt_Ajuste       = constrain(pwmInt_Ajuste, ajuste, 255);
+
+    // Affichage direct dans le moniteur série (debug)
+    Serial.print("Tics_G: ");    Serial.print(autoTicsG);
+    Serial.print(" | Tics_D: "); Serial.print(autoTicsD);
+    Serial.print(" | Erreur: "); Serial.print(erreur);
+    Serial.print(" | PWM D: ");  Serial.println(pwmInt_Ajuste);
+
+    avancerMoteurs(pwmExtBase, pwmInt_Ajuste);
+    delay(10);
+  }
+
+  Serial.println("=== FIN DU CERCLE ===");
+  arreterMoteurs();
+  if (sequenceEnCours) delay(500);
+  resetAutoEncoders();
+  sequenceEnCours = false;
+}
+
+// ==============================================================================
 // LE SITE WEB EMBARQUÉ
 // ==============================================================================
 const char index_html[] PROGMEM = R"rawliteral(
@@ -883,6 +993,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="sequence-section">
         <h3>Séquences de dessin</h3>
         <button class="btn-sequence" onclick="lancerSequence(1)">Séquence 1 - Escalier</button>
+        <div style="margin-top:12px;">
+            <label style="font-size:14px; color:#555;">Rayon stylo (cm) :</label>
+            <input type="number" id="rayonCercle" value="20" min="2" max="20" step="0.5"
+                   style="width:70px; padding:8px; font-size:16px; text-align:center;">
+            <button class="btn-sequence" onclick="lancerCercle()">Séquence 2 - Cercle</button>
+        </div>
         <button class="btn-sequence" style="background:#27ae60;" onclick="lancerSequence(3)">Séquence 3 - Flèche Nord</button>
         <button class="btn-sequence" style="background:#555; font-size:13px; padding:8px 16px;" onclick="voirDebugSeq3()">📋 Voir debug</button>
         <div id="mag-status" style="margin-top:6px; font-size:13px; color:#555;">
@@ -1004,6 +1120,16 @@ const char index_html[] PROGMEM = R"rawliteral(
             });
         }
 
+        function lancerCercle() {
+            const r = document.getElementById('rayonCercle').value;
+            document.getElementById('seq-status').innerText = "Cercle r=" + r + " cm en cours...";
+            log("Lancement cercle r=" + r + " cm", "tx");
+            fetch('/sequence2?r=' + r).then(res => res.text()).then(text => {
+                log("Réponse: " + text, "rx");
+                document.getElementById('seq-status').innerText = text;
+            });
+        }
+
         function lancerTest(type) {
             document.getElementById('seq-status').innerText = "Test " + type + " en cours...";
             log("Lancement test " + type, "tx");
@@ -1084,6 +1210,11 @@ void handleAction() {
       server.send(200, "text/plain", "Position réinitialisée");
     } else {
       etatCourant = cmd;
+      if (cmd == 0) {            // STOP : interrompt aussi une séquence en cours (cercle)
+        sequenceEnCours = false; // -> la boucle de executerCercle sort par "arrêt d'urgence"
+        currentState = REPOS;
+        arreterMoteurs();
+      }
       server.send(200, "text/plain", "OK");
     }
   }
@@ -1119,6 +1250,31 @@ void handleSequence1() {
   }
   server.send(200, "text/plain", "Escalier lancé");
   drawStairs();
+}
+
+void handleSequence2() {
+  if (sequenceEnCours) {
+    server.send(409, "text/plain", "Séquence déjà en cours");
+    return;
+  }
+
+  float rayon = 20.0;
+  if (server.hasArg("r")) rayon = server.arg("r").toFloat();
+
+  // Plage cahier des charges : 2 a 20 cm
+  if (rayon < 2.0f || rayon > 20.0f) {
+    server.send(400, "text/plain", "Rayon hors plage (2-20 cm)");
+    return;
+  }
+
+  // Limite physique : sous le seuil le robot ne peut que pivoter (trace ~13.5 cm).
+  // On accepte la demande mais on indique le mode utilise.
+  if (rayon < CERCLE_SEUIL_PIVOT) {
+    server.send(200, "text/plain", "Rayon < " + String(CERCLE_SEUIL_PIVOT, 0) + " cm -> PIVOT (trace ~13.5 cm) lance");
+  } else {
+    server.send(200, "text/plain", "Cercle r=" + String(rayon, 1) + " cm lance");
+  }
+  executerCercle(rayon);
 }
 
 void handleSequence3() {
@@ -1193,6 +1349,7 @@ void setup() {
   server.on("/action", handleAction);
   server.on("/telemetry", handleTelemetry);
   server.on("/sequence1", handleSequence1);
+  server.on("/sequence2", handleSequence2);
   server.on("/sequence3", handleSequence3);
   server.on("/seq3log",   handleSeq3Log);
   server.on("/test", handleTest);
