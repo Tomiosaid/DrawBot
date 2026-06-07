@@ -615,58 +615,59 @@ static void seq_pivotAngleDroit(float angleDeg) {
 }
 
 // ==============================================================================
-// FLÈCHE : hampe 40mm + tête en zigzags DÉCROISSANTS par différentiel de vitesse
+// FLECHE NORD : hampe 40mm + triangle isocele (perimetre)
 //
-// Aucun pivot pendant la tête → pas d'arcs parasites.
-// Le robot avance en oscillant gauche-droite avec un différentiel de roues
-// qui diminue à chaque niveau → zigzag large en bas, fin en haut = flèche.
+// Triangle :  base 40mm, hauteur 40mm
+//   demi-base = 20mm, cote = sqrt(20^2+40^2) = 44.7mm
+//   angle base/cote = atan(40/20) = 63.4 deg
+//   angle au sommet = 180 - 2*63.4 = 53.1 deg
 //
-//   [départ] → hampe 40mm → zigzag niveau 6 (large) → ... → niveau 1 (fin) → pointe
-//
-// Différentiel : roue rapide = BASE+DIFF, roue lente = BASE-DIFF
-// DIFF décroît de ZIG_DIFF_MAX (base large) à 0 (pointe droite)
+// Tracé depuis le centre de la base, face au Nord :
+//   [A] avance 40mm (hampe) → arrive centre base
+//   [B] pivot D 90°         → face droite
+//   [C] avance 20mm         → coin base-droit
+//   [D] pivot G 116°        → face vers apex (180-63.4=116.6)
+//   [E] avance 44.7mm       → apex (pointe Nord)
+//   [F] pivot G 127°        → face vers coin base-gauche (360-2*116.6=126.8)
+//   [G] avance 44.7mm       → coin base-gauche
+//   [H] pivot G 116°        → face gauche
+//   [I] avance 40mm         → ferme la base (retour centre base)
+//   [J] pivot D 90°         → retour face Nord
 // ==============================================================================
-#define FLECHE_HAMPE_MM   40.0f
-#define ZIG_BASE_SPEED    120        // vitesse de base pendant la tête
-#define ZIG_DIFF_MAX      100        // différentiel max élevé → branches quasi-perpendiculaires
-#define ZIG_LEVELS        5          // 5 niveaux (base large → pointe)
-#define ZIG_DIST_MM       8.0f       // 8mm par demi-branche
-
-// Avance d'une courbe : roue gauche à leftPWM, droite à rightPWM, sur distMm
-static void seq_courbe(float distMm, int leftPWM, int rightPWM) {
-  resetAutoEncoders();
-  const float STOP = -5.0f;
-  avancerMoteurs(leftPWM, rightPWM);
-  while (getAutoAverageDistance() < distMm - STOP) {
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-  delay(80);
-}
+#define FLECHE_HAMPE_MM  40.0f
+#define TRI_DEMI_BASE    20.0f
+#define TRI_COTE_MM      44.7f
+#define TRI_ANGLE_BASE   116.6f   // angle de virage aux coins de la base
+#define TRI_ANGLE_APEX   126.8f   // angle de virage au sommet
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // 1. HAMPE : avancer 40mm tout droit vers le Nord
+  // A. Hampe
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // 2. TÊTE : zigzags décroissants en avançant vers la pointe
-  // Niveau i = ZIG_LEVELS (base, large) → 1 (pointe, quasi-droit)
-  // Roue lente = 0 au niveau max → branche quasi-perpendiculaire
-  // Roue lente augmente progressivement → angle obtus vers la pointe
-  for (int i = ZIG_LEVELS; i >= 1; i--) {
-    int fast = ZIG_BASE_SPEED + 40;                              // roue rapide : constante
-    int slow = (int)((float)(ZIG_LEVELS - i) * 80.0f / (ZIG_LEVELS - 1)); // 0 → 80 progressivement
+  // B. Vers coin base-droit
+  seq_pivotAngleDroit(90.0f);
+  // C.
+  seq_avancer(TRI_DEMI_BASE);
 
-    // Demi-oscillation droite : roue gauche rapide → courbe à droite
-    seq_courbe(ZIG_DIST_MM, fast, slow);
-    // Demi-oscillation gauche : roue droite rapide → courbe à gauche
-    seq_courbe(ZIG_DIST_MM, slow, fast);
-  }
+  // D. Vers apex
+  seq_pivotAngleGauche(TRI_ANGLE_BASE);
+  // E.
+  seq_avancer(TRI_COTE_MM);
 
-  // Dernière avance droite pour finir sur la pointe
-  seq_avancer(8.0f);
+  // F. Vers coin base-gauche
+  seq_pivotAngleGauche(TRI_ANGLE_APEX);
+  // G.
+  seq_avancer(TRI_COTE_MM);
+
+  // H. Ferme la base
+  seq_pivotAngleGauche(TRI_ANGLE_BASE);
+  // I.
+  seq_avancer(TRI_DEMI_BASE);
+
+  // J. Retour face Nord
+  seq_pivotAngleDroit(90.0f);
 }
 
 // ==============================================================================
