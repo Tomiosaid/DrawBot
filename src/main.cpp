@@ -326,15 +326,17 @@ static void seq_majGyro() {
 static void seq_avancer(float distanceMm) {
   delay(100);            // stabilisation mécanique avant démarrage
   resetAutoEncoders();   // RAZ propre après stabilisation (élimine ticks de rebond)
+  seq_resetGyro();       // cap actuel = référence 0°
 
   const float STOP_THRESHOLD = -10.0f;
   const int   BASE_SPEED     = 150;
-  const int   KP_DIR         = 4;  // doublé : correction plus agressive pour tenir droit
+  const float KP_GYRO        = 6.0f;  // correction gyroscopique (augmenter si dérive persiste)
 
   while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
-    int diff       = (int)(autoTicsG - autoTicsD);
-    int leftSpeed  = constrain(BASE_SPEED - KP_DIR * diff, 80, 255);
-    int rightSpeed = constrain(BASE_SPEED + KP_DIR * diff, 80, 255);
+    seq_majGyro();
+    int correction = (int)(-KP_GYRO * angleZ);
+    int leftSpeed  = constrain(BASE_SPEED + correction, 80, 255);
+    int rightSpeed = constrain(BASE_SPEED - correction, 80, 255);
     avancerMoteurs(leftSpeed, rightSpeed);
     server.handleClient();
     delay(10);
