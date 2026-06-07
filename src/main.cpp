@@ -324,11 +324,12 @@ static void seq_majGyro() {
 // Correction P sur le différentiel d'encodeurs pour compenser la dérive.
 // STOP_THRESHOLD : distance d'anticipation pour absorber l'inertie (à calibrer).
 static void seq_avancer(float distanceMm) {
-  resetAutoEncoders();
+  delay(100);            // stabilisation mécanique avant démarrage
+  resetAutoEncoders();   // RAZ propre après stabilisation (élimine ticks de rebond)
 
-  const float STOP_THRESHOLD = -10.0f; // négatif = dépasse la cible encodeur, inertie quasi nulle
+  const float STOP_THRESHOLD = -10.0f;
   const int   BASE_SPEED     = 150;
-  const int   KP_DIR         = 2;
+  const int   KP_DIR         = 4;  // doublé : correction plus agressive pour tenir droit
 
   while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
     int diff       = (int)(autoTicsG - autoTicsD);
@@ -539,9 +540,7 @@ void drawStairs() {
   marquerPoint();        // ET1.1 : marquage départ
 
   seq_avancer(200.0f);  // segment 1 : 20 cm
-  seq_virerGauche();    // angle 1 : pivot gauche 90°
-  seq_avancer(100.0f);  // segment 2 : 10 cm (la marche)
-  seq_virerDroit();     // angle 2 : pivot droit 90°
+  seq_marche();         // marche : arc ~10cm + correction
   seq_avancer(400.0f);  // segment 3 : 40 cm
 
   marquerPoint();        // ET1.1 : marquage arrivée
