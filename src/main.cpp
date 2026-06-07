@@ -615,42 +615,28 @@ static void seq_pivotAngleDroit(float angleDeg) {
 }
 
 // ==============================================================================
-// FLECHE NORD : trait 40mm plein Nord + deux arcs (petit + grand fermant)
+// FLECHE NORD : trait 40mm plein Nord + marquage final gauche/droite
 //
-// [1] Avancer 40mm plein Nord — la tige
-// [2] Petit arc gauche-droite (marque la pointe)
-//       G 20° → D 40° → G 20° — retour face Nord
-// [3] Reculer 10mm (repositionnement pour le grand arc)
-// [4] Grand arc gauche-droite-gauche (ferme la flèche)
-//       G 65° → D 130° → G 65° — retour face Nord
+// [1] Avancer 40mm plein Nord (tige obligatoire)
+// [2] Petit pivot gauche 20° — marque l'arrêt
+// [3] Petit pivot droit 40° — revient et dépasse de 20° de l'autre côté
+// [4] Petit pivot gauche 20° — retour face Nord
 // ==============================================================================
-#define FLECHE_HAMPE_MM      40.0f
-#define FLECHE_RECUL_MM      10.0f
-#define FLECHE_ARC_PETIT     20.0f  // demi-angle du petit arc (pointe)
-#define FLECHE_ARC_GRAND     65.0f  // demi-angle du grand arc (fermeture)
+#define FLECHE_HAMPE_MM   40.0f
+#define FLECHE_MARQUE_DEG 20.0f   // amplitude du zigzag de marquage
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // [1] Tige plein Nord — 40 mm
-  seq3Print("Fleche [1/4] : tige 40mm plein Nord...");
+  // [1] Trait plein Nord — 40 mm
+  seq3Print("Fleche [1/2] : trait 40mm plein Nord...");
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // [2] Petit arc — marque la pointe
-  seq3Print("Fleche [2/4] : petit arc pointe...");
-  seq_pivotAngleGauche(FLECHE_ARC_PETIT);
-  seq_pivotAngleDroit(FLECHE_ARC_PETIT * 2.0f);
-  seq_pivotAngleGauche(FLECHE_ARC_PETIT);         // retour face Nord
-
-  // [3] Reculer 10mm — repositionnement
-  seq3Print("Fleche [3/4] : recul 10mm...");
-  seq_reculer(FLECHE_RECUL_MM);
-
-  // [4] Grand arc — ferme la flèche
-  seq3Print("Fleche [4/4] : grand arc fermeture...");
-  seq_pivotAngleGauche(FLECHE_ARC_GRAND);
-  seq_pivotAngleDroit(FLECHE_ARC_GRAND * 2.0f);
-  seq_pivotAngleGauche(FLECHE_ARC_GRAND);         // retour face Nord
+  // [2] Marquage final : petit gauche-droite-gauche
+  seq3Print("Fleche [2/2] : marquage gauche-droite...");
+  seq_pivotAngleGauche(FLECHE_MARQUE_DEG);
+  seq_pivotAngleDroit(FLECHE_MARQUE_DEG * 2.0f);
+  seq_pivotAngleGauche(FLECHE_MARQUE_DEG);        // retour face Nord
 }
 
 // ==============================================================================
