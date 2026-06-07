@@ -48,7 +48,7 @@ float headingMag   = 0.0f;   // cap magnétique corrigé (-180..+180°), mis à 
 float magOffsetX   = 0.0f;
 float magOffsetY   = 0.0f;
 bool  magCalibrated = false;
-#define MOUNTING_OFFSET 0.0f  // décalage montage LIS3MDL → ajuster si Nord décalé au premier test
+#define MOUNTING_OFFSET 73.0f // calibré empiriquement : cap_raw=-73°-θ, MOUNTING_OFFSET=+73° → cap_corr=-θ
 
 // Log debug séquence 3 — récupérable via /seq3log depuis le dashboard WiFi
 String seq3Log = "Aucun essai encore.";
@@ -532,7 +532,7 @@ static float seq_passeCorrection(int numPasse) {
   float cap = mesurerCap();
   seq3Print("P" + String(numPasse) + " cap=" + String(cap, 1) + " deg");
 
-  float correction = -cap;
+  float correction = cap;
   while (correction >  180.0f) correction -= 360.0f;
   while (correction < -180.0f) correction += 360.0f;
 
