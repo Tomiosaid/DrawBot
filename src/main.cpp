@@ -615,59 +615,57 @@ static void seq_pivotAngleDroit(float angleDeg) {
 }
 
 // ==============================================================================
-// FLÈCHE : hampe 40mm + tête en zigzags DÉCROISSANTS en avançant vers la pointe
+// FLÈCHE : hampe 40mm + tête en zigzags DÉCROISSANTS par différentiel de vitesse
 //
-//   [départ] → avance 40mm (hampe) → arrive à la BASE du triangle
+// Aucun pivot pendant la tête → pas d'arcs parasites.
+// Le robot avance en oscillant gauche-droite avec un différentiel de roues
+// qui diminue à chaque niveau → zigzag large en bas, fin en haut = flèche.
 //
-//   BASE (zigzag large)
-//    \   /
-//     \ /    rangée 6 : angle 30°
-//      |
-//     / \    rangée 5 : angle 25°
-//    /   \
-//      ...
-//      |
-//    rangée 1 : angle 5° (quasi droit)
-//      *  ← POINTE (Nord)
+//   [départ] → hampe 40mm → zigzag niveau 6 (large) → ... → niveau 1 (fin) → pointe
 //
-// Par rangée i de N_ROWS→1 (grand→petit) :
-//   1. pivot gauche angle_i  → avance STEP_FWD  → pivot droit angle_i  (revient centre)
-//   2. avance STEP_FWD  (avance vers la pointe)
-//   3. pivot droit angle_i   → avance STEP_FWD  → pivot gauche angle_i (revient centre)
-//   4. avance STEP_FWD  (avance vers la pointe)
+// Différentiel : roue rapide = BASE+DIFF, roue lente = BASE-DIFF
+// DIFF décroît de ZIG_DIFF_MAX (base large) à 0 (pointe droite)
 // ==============================================================================
-#define FLECHE_HAMPE_MM  40.0f
-#define N_ROWS           6        // nombre de niveaux de zigzag
-#define MAX_ANGLE_DEG    30.0f    // angle max (base du triangle)
-#define STEP_FWD         6.0f     // avance entre chaque demi-zigzag (mm)
+#define FLECHE_HAMPE_MM   40.0f
+#define ZIG_BASE_SPEED    120        // vitesse de base pendant la tête
+#define ZIG_DIFF_MAX      55         // différentiel max (base du triangle)
+#define ZIG_LEVELS        6          // nombre de niveaux
+#define ZIG_DIST_MM       7.0f       // distance par demi-oscillation (mm)
+
+// Avance d'une courbe : roue gauche à leftPWM, droite à rightPWM, sur distMm
+static void seq_courbe(float distMm, int leftPWM, int rightPWM) {
+  resetAutoEncoders();
+  const float STOP = -5.0f;
+  avancerMoteurs(leftPWM, rightPWM);
+  while (getAutoAverageDistance() < distMm - STOP) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(80);
+}
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // 1. HAMPE : avancer 40mm vers le Nord
+  // 1. HAMPE : avancer 40mm tout droit vers le Nord
   seq_avancer(FLECHE_HAMPE_MM);
 
   // 2. TÊTE : zigzags décroissants en avançant vers la pointe
-  // i va de N_ROWS (grand angle) à 1 (petit angle)
-  for (int i = N_ROWS; i >= 1; i--) {
-    float angle = (float)i * (MAX_ANGLE_DEG / N_ROWS);  // 30°, 25°, 20°, 15°, 10°, 5°
+  // Niveau i = ZIG_LEVELS (base, large) → 1 (pointe, quasi-droit)
+  for (int i = ZIG_LEVELS; i >= 1; i--) {
+    int diff = (int)((float)i * ZIG_DIFF_MAX / ZIG_LEVELS);
+    int fast = constrain(ZIG_BASE_SPEED + diff, 80, 255);
+    int slow = constrain(ZIG_BASE_SPEED - diff, 60, 255);
 
-    // demi-zigzag gauche : pivot gauche → avance → retour centre
-    seq_pivotAngleGauche(angle);
-    seq_avancer(STEP_FWD);
-    seq_pivotAngleDroit(angle);
-
-    // avance vers la pointe
-    seq_avancer(STEP_FWD);
-
-    // demi-zigzag droit : pivot droit → avance → retour centre
-    seq_pivotAngleDroit(angle);
-    seq_avancer(STEP_FWD);
-    seq_pivotAngleGauche(angle);
-
-    // avance vers la pointe
-    seq_avancer(STEP_FWD);
+    // Demi-oscillation droite : roue gauche rapide → courbe à droite
+    seq_courbe(ZIG_DIST_MM, fast, slow);
+    // Demi-oscillation gauche : roue droite rapide → courbe à gauche
+    seq_courbe(ZIG_DIST_MM, slow, fast);
   }
+
+  // Dernière avance droite pour finir sur la pointe
+  seq_avancer(8.0f);
 }
 
 // ==============================================================================
