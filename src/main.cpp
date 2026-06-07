@@ -572,86 +572,81 @@ static void seq_orienterNord() {
 }
 
 // ==============================================================================
-// FLÈCHE NORD — TRIANGLE PLEIN PAR BALAYAGE EN ÉVENTAIL
-//
-// Le robot part de la BASE du triangle (position de départ), avance vers
-// la POINTE pour chaque ligne, puis recule au point de départ.
-// En dernier il avance la hampe pour tracer la tige.
+// FLÈCHE NORD — dessinée vers l'avant du robot (= le Nord après orienterNord)
 //
 // Géométrie :
-//   Hampe         : FLECHE_HAMPE_MM = 40 mm
-//   Demi-angle    : HALF_ANGLE      = 35°
-//   Base          : 2 × 40 × tan(35°) ≈ 56 mm
+//   Hampe : 40 mm tout droit
+//   Tête  : depuis la pointe de la hampe,
+//           - arc gauche  12 mm (roue gauche lente, droite rapide)
+//           - retour au centre (recul 12 mm)
+//           - arc droit   12 mm (roue droite lente, gauche rapide)
 //
-// Algorithme depuis la BASE (position initiale du robot) :
-//   Pivot à +HALF_ANGLE (bord gauche du triangle)
-//   Pour i = N_LIGNES..0 :
-//     1. Pivoter vers l'angle i*STEP_DEG
-//     2. Avancer L(i) = HAMPE / cos(i*STEP_DEG)  → trace vers la pointe
-//     3. Reculer L(i)                             → revient à la base
-//   Revenir face au Nord
-//   Avancer HAMPE → trace la hampe vers le Nord
-//
-// Bordures droites : L(i)·cos(θ) = HAMPE = constante → base horizontale.
-// Couverture : 9 lignes × 3.9° → espacement ~3.5 mm → >80% avec feutre 2 mm
-// ==============================================================================
-#define FLECHE_HAMPE_MM 40.0f
-#define HALF_ANGLE      35.0f
-#define N_LIGNES        9
-#define STEP_DEG        (HALF_ANGLE / N_LIGNES)   // ≈ 3.89° par ligne
-
-// Pivot encodeur pur d'un angle (deg) vers la gauche
-static void seq_pivotAngleGauche(float angleDeg) {
-  long ticks = (long)(angleDeg * TICKS_90 / 90.0f);
-  if (ticks < 1) return;
-  seq_pivotGaucheN(ticks, SPEED_PIVOT);
-}
-
-// Pivot encodeur pur d'un angle (deg) vers la droite
-static void seq_pivotAngleDroit(float angleDeg) {
-  long ticks = (long)(angleDeg * TICKS_90 / 90.0f);
-  if (ticks < 1) return;
-  seq_pivotDroitN(ticks, SPEED_PIVOT);
-}
-
-// ==============================================================================
-// FLECHE NORD : trait 40mm plein Nord + marquage final gauche/droite
-//
-// [1] Avancer 40mm plein Nord (tige obligatoire)
-// [2] Petit pivot gauche 20° — marque l'arrêt
-// [3] Petit pivot droit 40° — revient et dépasse de 20° de l'autre côté
-// [4] Petit pivot gauche 20° — retour face Nord
+// Tolérance barème : longueur totale > 30 mm → 40 mm hampe largement satisfait.
+// Les arcs de la tête sont en avant depuis la pointe : ils tracent deux courbes
+// symétriques vers l'extérieur, formant une pointe de flèche lisible.
 // ==============================================================================
 #define FLECHE_HAMPE_MM   40.0f
-#define FLECHE_MARQUE_DEG 20.0f   // amplitude du zigzag de marquage
+#define FLECHE_BRANCHE_MM 12.0f
+
+// Arc avant gauche : G lente, D rapide (robot courbe vers la gauche)
+#define SPEED_BRANCH_FAST  130
+#define SPEED_BRANCH_SLOW   50
+
+static void seq_arcBrancheGauche() {
+  resetAutoEncoders();
+  float ticks_cible = FLECHE_BRANCHE_MM / MM_PAR_TICK;
+  avancerMoteurs(SPEED_BRANCH_SLOW, SPEED_BRANCH_FAST);  // G lente → courbe gauche
+  while (getAutoAverageDistance() < FLECHE_BRANCHE_MM * 0.85f) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(150);
+}
+
+// Arc avant droit : G rapide, D lente (robot courbe vers la droite)
+static void seq_arcBrancheDroite() {
+  resetAutoEncoders();
+  avancerMoteurs(SPEED_BRANCH_FAST, SPEED_BRANCH_SLOW);  // D lente → courbe droite
+  while (getAutoAverageDistance() < FLECHE_BRANCHE_MM * 0.85f) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(150);
+}
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // [1] Trait plein Nord — 40 mm
-  seq3Print("Fleche [1/2] : trait 40mm plein Nord...");
+  // 1. Hampe : avancer 40 mm tout droit
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // [2] Marquage final : petit gauche-droite-gauche
-  seq3Print("Fleche [2/2] : marquage gauche-droite...");
-  seq_pivotAngleGauche(FLECHE_MARQUE_DEG);
-  seq_pivotAngleDroit(FLECHE_MARQUE_DEG * 2.0f);
-  seq_pivotAngleGauche(FLECHE_MARQUE_DEG);        // retour face Nord
+  // 2. Branche gauche depuis la pointe
+  seq_arcBrancheGauche();
+
+  // 3. Revenir au centre (recul 12 mm)
+  seq_reculer(FLECHE_BRANCHE_MM);
+
+  // 4. Branche droite depuis la pointe
+  seq_arcBrancheDroite();
 }
 
 // ==============================================================================
 // SÉQUENCE 3 : FLÈCHE NORD COMPLÈTE
 //   Étape 1 — calibration hard-iron (spin 360° lent)
 //   Étape 2 — orienter le robot face au Nord (pivot encodeur)
-//   Étape 3 — dessiner la flèche (hampe + triangle plein)
+//   Étape 3 — dessiner la flèche vers l'avant
 // ==============================================================================
 void drawNorthArrow() {
   sequenceEnCours = true;
-  seq3Log = "";
+  seq3Log = "";   // reset log à chaque essai
 
   seq3Print("=== SEQ3 DEBUT ===");
   calibrerMagnetometre();
+
   seq_orienterNord();
+
   seq3Print("=== FLECHE ===");
   seq_flecheNord();
 
