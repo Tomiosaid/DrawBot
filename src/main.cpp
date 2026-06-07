@@ -614,53 +614,56 @@ static void seq_pivotAngleDroit(float angleDeg) {
   seq_pivotDroitN(ticks, SPEED_PIVOT);
 }
 
-// Hauteur du triangle (séparée de la hampe)
-#define TRI_HEIGHT_MM 35.0f
+// ==============================================================================
+// FLÈCHE : hampe 40mm puis strokes gauche-droite croissants en reculant
+//
+//   Pointe (Nord)
+//      *          ← fin hampe / début triangle
+//     /|\
+//    / | \
+//   /  |  \       ← strokes de plus en plus larges
+//  /   |   \
+// *----+----*     ← base (robot ici en fin de séquence)
+//      |
+//      |          ← hampe 40mm tracée en avançant
+//   [départ]
+//
+// Par rangée i (i=1..N_ROWS) :
+//   pivot gauche  i×STEP_DEG  →  avance STROKE_MM  →  recule STROKE_MM  →  pivot droit  i×STEP_DEG
+//   pivot droit   i×STEP_DEG  →  avance STROKE_MM  →  recule STROKE_MM  →  pivot gauche i×STEP_DEG
+//   recule BACK_MM (descend d'un cran vers la base)
+// ==============================================================================
+#define FLECHE_HAMPE_MM 40.0f
+#define N_ROWS          8          // nombre de rangées
+#define STROKE_STEP_DEG 4.0f       // incrément d'angle par rangée (max = 8×4 = 32°)
+#define STROKE_MM       20.0f      // longueur de chaque branche
+#define BACK_MM         5.0f       // recul entre deux rangées
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // ---- 1. HAMPE : avancer 40mm vers le Nord ----
-  // Robot part du bord du cercle, trace la tige, arrive à la BASE du triangle
+  // 1. HAMPE : avancer 40 mm vers le Nord
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // ---- 2. CÔTÉ GAUCHE du triangle ----
-  // Pivot gauche jusqu'au bord gauche (35°), puis balayage vers le centre
-  seq_pivotAngleGauche(HALF_ANGLE);
-  float angleAccumG = HALF_ANGLE;
+  // 2. TRIANGLE : strokes gauche-droite de plus en plus larges en reculant
+  for (int i = 1; i <= N_ROWS; i++) {
+    float angle = i * STROKE_STEP_DEG;
 
-  for (int i = N_LIGNES; i >= 0; i--) {
-    float angleCible = i * STEP_DEG;
-    float delta = angleAccumG - angleCible;  // positif → pivot droit pour revenir vers centre
-    if (delta > 0.5f) seq_pivotAngleDroit(delta);
-    angleAccumG = angleCible;
+    // -- stroke gauche --
+    seq_pivotAngleGauche(angle);
+    seq_avancer(STROKE_MM);
+    seq_reculer(STROKE_MM);
+    seq_pivotAngleDroit(angle);   // retour centre
 
-    // Longueur exacte : L = TRI_HEIGHT / cos(θ) → pointe alignée sur axe Nord
-    float angleRad = angleCible * PI / 180.0f;
-    float longueur = TRI_HEIGHT_MM / cos(angleRad);
+    // -- stroke droit --
+    seq_pivotAngleDroit(angle);
+    seq_avancer(STROKE_MM);
+    seq_reculer(STROKE_MM);
+    seq_pivotAngleGauche(angle);  // retour centre
 
-    seq_avancer(longueur);  // trace vers la pointe
-    seq_reculer(longueur);  // revient à la base
+    // -- descendre d'un cran vers la base --
+    seq_reculer(BACK_MM);
   }
-  // Robot face au Nord, à la base du triangle
-
-  // ---- 3. CÔTÉ DROIT du triangle ----
-  seq_pivotAngleDroit(HALF_ANGLE);
-  float angleAccumD = HALF_ANGLE;
-
-  for (int i = N_LIGNES; i >= 0; i--) {
-    float angleCible = i * STEP_DEG;
-    float delta = angleAccumD - angleCible;  // positif → pivot gauche pour revenir vers centre
-    if (delta > 0.5f) seq_pivotAngleGauche(delta);
-    angleAccumD = angleCible;
-
-    float angleRad = angleCible * PI / 180.0f;
-    float longueur = TRI_HEIGHT_MM / cos(angleRad);
-
-    seq_avancer(longueur);
-    seq_reculer(longueur);
-  }
-  // Robot face au Nord, à la base du triangle — séquence terminée
 }
 
 // ==============================================================================
