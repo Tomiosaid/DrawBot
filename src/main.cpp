@@ -324,8 +324,8 @@ static void seq_majGyro() {
 // Correction P sur le différentiel d'encodeurs pour compenser la dérive.
 // STOP_THRESHOLD : distance d'anticipation pour absorber l'inertie (à calibrer).
 static void seq_avancer(float distanceMm) {
-  delay(100);            // stabilisation mécanique avant démarrage
-  resetAutoEncoders();   // RAZ propre après stabilisation (élimine ticks de rebond)
+  for (int i = 0; i < 20; i++) { seq_majGyro(); delay(5); }  // 100ms stabilisation active
+  resetAutoEncoders();
 
   const float STOP_THRESHOLD = -10.0f;
   const int   BASE_SPEED     = 150;
@@ -494,9 +494,9 @@ static void seq_arcGauche() {
   digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
   analogWrite(PIN_IN1_G, 0);            analogWrite(PIN_IN2_G, SPEED_ARC_IN);   // G arrière
   analogWrite(PIN_IN1_D, 0);            analogWrite(PIN_IN2_D, SPEED_ARC_OUT);  // D avant
-  while (autoTicsD < TICKS_MARCHE) { server.handleClient(); delay(5); }
+  while (autoTicsD < TICKS_MARCHE) { seq_majGyro(); server.handleClient(); delay(5); }
   arreterMoteurs();
-  delay(250);
+  for (int i = 0; i < 50; i++) { seq_majGyro(); delay(5); }  // 250ms actif
 }
 
 // Arc droit serré (correction) : G=extérieure (avant), D=intérieure (arrière)
@@ -505,9 +505,9 @@ static void seq_arcDroit() {
   digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
   analogWrite(PIN_IN1_G, SPEED_ARC_OUT); analogWrite(PIN_IN2_G, 0);            // G avant
   analogWrite(PIN_IN1_D, SPEED_ARC_IN);  analogWrite(PIN_IN2_D, 0);            // D arrière
-  while (autoTicsG < TICKS_MARCHE) { server.handleClient(); delay(5); }
+  while (autoTicsG < TICKS_MARCHE) { seq_majGyro(); server.handleClient(); delay(5); }
   arreterMoteurs();
-  delay(250);
+  for (int i = 0; i < 50; i++) { seq_majGyro(); delay(5); }  // 250ms actif
 }
 
 // Repositionnement actif : avance en tournant doucement à droite
@@ -523,9 +523,9 @@ static void seq_marche() {
   // Repositionnement actif : avance en arc doux vers la droite
   resetAutoEncoders();
   avancerMoteurs(SPEED_REPO_FAST, SPEED_REPO_SLOW);
-  while (autoTicsG < TICKS_REPO) { server.handleClient(); delay(5); }
+  while (autoTicsG < TICKS_REPO) { seq_majGyro(); server.handleClient(); delay(5); }
   arreterMoteurs();
-  delay(250);
+  for (int i = 0; i < 50; i++) { seq_majGyro(); delay(5); }  // 250ms actif
 }
 
 // ==============================================================================
