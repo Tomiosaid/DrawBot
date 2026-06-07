@@ -572,228 +572,109 @@ static void seq_orienterNord() {
 }
 
 // ==============================================================================
-// FLÈCHE NORD — dessinée vers l'avant du robot (= le Nord après orienterNord)
+// FLÈCHE NORD — TRIANGLE PLEIN PAR BALAYAGE EN ÉVENTAIL
 //
-// Géométrie :
-//   Hampe : 40 mm tout droit
-//   Tête  : depuis la pointe de la hampe,
-//           - arc gauche  12 mm (roue gauche lente, droite rapide)
-//           - retour au centre (recul 12 mm)
-//           - arc droit   12 mm (roue droite lente, gauche rapide)
+// Géométrie (triangle isocèle pointe vers le Nord) :
+//   Hampe         : FLECHE_HAMPE_MM = 40 mm
+//   Demi-angle    : HALF_ANGLE      = 35°
+//   Base          : 2 × 40 × tan(35°) ≈ 56 mm
 //
-// Tolérance barème : longueur totale > 30 mm → 40 mm hampe largement satisfait.
-// Les arcs de la tête sont en avant depuis la pointe : ils tracent deux courbes
-// symétriques vers l'extérieur, formant une pointe de flèche lisible.
+// Algorithme depuis la POINTE :
+//   Pour i = 1..N_LIGNES côté gauche :
+//     1. Pivot gauche de STEP_DEG supplémentaire (encodeur pur)
+//     2. Recule L(i) = HAMPE / cos(i × STEP_DEG)  → trace la ligne
+//     3. Avance L(i)                               → revient à la pointe
+//   Pivot droit pour annuler toute l'inclinaison gauche
+//   Symétrique côté droit
+//   Pivot gauche pour revenir face au Nord
+//   Recule HAMPE → trace la hampe
+//
+// Bordures droites : tous les points d'arrivée ont la même coordonnée
+//   y = −L(i)·cos(θ) = −HAMPE (constante) → base horizontale garantie.
+// Couverture  : 9 lignes × 3.9° → espacement ~3.5 mm → >80% avec feutre 2 mm
 // ==============================================================================
-#define FLECHE_HAMPE_MM   40.0f
-#define FLECHE_BRANCHE_MM 12.0f
+#define FLECHE_HAMPE_MM 40.0f
+#define HALF_ANGLE      35.0f
+#define N_LIGNES        9
+#define STEP_DEG        (HALF_ANGLE / N_LIGNES)   // ≈ 3.89° par ligne
 
-// Arc avant gauche : G lente, D rapide (robot courbe vers la gauche)
-#define SPEED_BRANCH_FAST  130
-#define SPEED_BRANCH_SLOW   50
-
-static void seq_arcBrancheGauche() {
-  resetAutoEncoders();
-  float ticks_cible = FLECHE_BRANCHE_MM / MM_PAR_TICK;
-  avancerMoteurs(SPEED_BRANCH_SLOW, SPEED_BRANCH_FAST);  // G lente → courbe gauche
-  while (getAutoAverageDistance() < FLECHE_BRANCHE_MM * 0.85f) {
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-  delay(150);
+// Pivot encodeur pur d'un angle (deg) vers la gauche
+static void seq_pivotAngleGauche(float angleDeg) {
+  long ticks = (long)(angleDeg * TICKS_90 / 90.0f);
+  if (ticks < 1) return;
+  seq_pivotGaucheN(ticks, SPEED_PIVOT);
 }
 
-// Arc avant droit : G rapide, D lente (robot courbe vers la droite)
-static void seq_arcBrancheDroite() {
-  resetAutoEncoders();
-  avancerMoteurs(SPEED_BRANCH_FAST, SPEED_BRANCH_SLOW);  // D lente → courbe droite
-  while (getAutoAverageDistance() < FLECHE_BRANCHE_MM * 0.85f) {
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-  delay(150);
+// Pivot encodeur pur d'un angle (deg) vers la droite
+static void seq_pivotAngleDroit(float angleDeg) {
+  long ticks = (long)(angleDeg * TICKS_90 / 90.0f);
+  if (ticks < 1) return;
+  seq_pivotDroitN(ticks, SPEED_PIVOT);
 }
 
 static void seq_flecheNord() {
+  // ---- 1. HAMPE : avancer jusqu'à la pointe ----
   seq_resetGyro();
-
-  // 1. Hampe : avancer 40 mm tout droit
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // 2. Branche gauche depuis la pointe
-  seq_arcBrancheGauche();
+  // ---- 2. CÔTÉ GAUCHE ----
+  float angleAccumG = 0.0f;
+  for (int i = 1; i <= N_LIGNES; i++) {
+    float angleCible = i * STEP_DEG;
+    seq_pivotAngleGauche(angleCible - angleAccumG);
+    angleAccumG = angleCible;
 
-  // 3. Revenir au centre (recul 12 mm)
-  seq_reculer(FLECHE_BRANCHE_MM);
+    // Longueur exacte pour que le bout de la ligne tombe sur la base droite
+    float angleRad = angleCible * PI / 180.0f;
+    float longueur = FLECHE_HAMPE_MM / cos(angleRad);
 
-  // 4. Branche droite depuis la pointe
-  seq_arcBrancheDroite();
+    seq_reculer(longueur);   // trace la ligne vers la base
+    seq_avancer(longueur);   // revient à la pointe
+  }
+
+  // Retour face au Nord
+  seq_pivotAngleDroit(angleAccumG);
+
+  // ---- 3. CÔTÉ DROIT ----
+  float angleAccumD = 0.0f;
+  for (int i = 1; i <= N_LIGNES; i++) {
+    float angleCible = i * STEP_DEG;
+    seq_pivotAngleDroit(angleCible - angleAccumD);
+    angleAccumD = angleCible;
+
+    float angleRad = angleCible * PI / 180.0f;
+    float longueur = FLECHE_HAMPE_MM / cos(angleRad);
+
+    seq_reculer(longueur);
+    seq_avancer(longueur);
+  }
+
+  // Retour face au Nord
+  seq_pivotAngleGauche(angleAccumD);
+
+  // ---- 4. HAMPE : recule pour tracer la tige ----
+  seq_reculer(FLECHE_HAMPE_MM);
 }
 
 // ==============================================================================
 // SÉQUENCE 3 : FLÈCHE NORD COMPLÈTE
 //   Étape 1 — calibration hard-iron (spin 360° lent)
 //   Étape 2 — orienter le robot face au Nord (pivot encodeur)
-//   Étape 3 — dessiner la flèche remplie (balayage polaire)
+//   Étape 3 — dessiner la flèche (hampe + triangle plein)
 // ==============================================================================
-void sequence3_FlecheNord();  // forward declaration
-
 void drawNorthArrow() {
   sequenceEnCours = true;
-  seq3Log = "";   // reset log à chaque essai
+  seq3Log = "";
 
   seq3Print("=== SEQ3 DEBUT ===");
   calibrerMagnetometre();
-
   seq_orienterNord();
-
-  seq3Print("=== FLECHE (balayage polaire) ===");
-  sequence3_FlecheNord();
+  seq3Print("=== FLECHE ===");
+  seq_flecheNord();
 
   arreterMoteurs();
   sequenceEnCours = false;
   seq3Print("=== SEQ3 FIN ===");
-}
-
-// ==============================================================================
-// SÉQUENCE 3 : BALAYAGE POLAIRE — remplissage du triangle (pointe de flèche)
-// Le bras de 135mm (PEN_OFFSET) sert de levier pour décaler le feutre
-// latéralement par micro-pivots de ~1.2°.
-// Triangle isocèle : base=50mm, hauteur=50mm, ~18 passes aller-retour.
-// ==============================================================================
-
-// Délai actif (maintient l'intégration gyro)
-static void delay_gyro(int ms) {
-  int iterations = ms / 5;
-  for (int i = 0; i < iterations; i++) { seq_majGyro(); delay(5); }
-}
-
-// Pivot vers un cap absolu (gyro). Précis pour micro-pivots.
-static void seq_pivot_absolu(float capCible) {
-  const int   SPEED_MICRO_PIVOT = 95;
-  const float TOLERANCE_ANGLE   = 0.5f;
-  const unsigned long TIMEOUT   = 3000;
-
-  unsigned long startTime = millis();
-
-  while (true) {
-    seq_majGyro();
-    float erreur = capCible - angleZ;
-
-    if (abs(erreur) <= TOLERANCE_ANGLE) break;
-    if (millis() - startTime > TIMEOUT) break;
-
-    if (erreur > 0) {
-      tournerDroite(SPEED_MICRO_PIVOT);
-    } else {
-      tournerGauche(SPEED_MICRO_PIVOT);
-    }
-
-    server.handleClient();
-    delay(2);
-  }
-  arreterMoteurs();
-  delay_gyro(100);
-}
-
-// Avance en maintenant un cap absolu donné
-static void seq_avancer_asservi(float distanceMm, float capCible) {
-  resetAutoEncoders();
-
-  const float STOP_THRESHOLD = -5.0f;
-  const int   BASE_SPEED     = 120;
-  const float KP_GYRO        = 8.0f;
-
-  while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
-    seq_majGyro();
-    int correction = (int)(-KP_GYRO * (angleZ - capCible));
-    int leftSpeed  = constrain(BASE_SPEED + correction, 70, 255);
-    int rightSpeed = constrain(BASE_SPEED - correction, 70, 255);
-    avancerMoteurs(leftSpeed, rightSpeed);
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-  delay_gyro(100);
-}
-
-// Recule en maintenant un cap absolu donné
-static void seq_reculer_asservi(float distanceMm, float capCible) {
-  resetAutoEncoders();
-
-  const float STOP_THRESHOLD = -5.0f;
-  const int   BASE_SPEED     = 120;
-  const float KP_GYRO        = 8.0f;
-
-  while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
-    seq_majGyro();
-    float erreur = angleZ - capCible;
-    int correction = (int)(KP_GYRO * erreur);
-    int leftSpeed  = constrain(BASE_SPEED - correction, 70, 255);
-    int rightSpeed = constrain(BASE_SPEED + correction, 70, 255);
-    reculerMoteurs(leftSpeed, rightSpeed);
-    server.handleClient();
-    delay(5);
-  }
-  arreterMoteurs();
-  delay_gyro(150);
-}
-
-// Balayage polaire — dessine la hampe (3cm) puis le triangle rempli
-// Géométrie : le stylo est à 135mm derrière l'axe des roues.
-// Quand le robot pivote de θ, le stylo balaie un arc de rayon 135mm.
-// Quand il avance de d à l'angle θ, le stylo trace une ligne radiale.
-// Pour que les BORDS du triangle soient DROITS (pas concaves), la longueur
-// de chaque ligne doit suivre : L(θ) = PEN_OFFSET - R_TIP / (cosθ - K·sinθ)
-// où K est la pente du côté du triangle en coordonnées polaires.
-void sequence3_FlecheNord() {
-  seq_resetGyro();  // cap 0° = Nord (robot déjà aligné)
-
-  // 1. Hampe : avancer 30 mm tout droit vers le Nord (le stylo trace la tige)
-  seq_avancer_asservi(30.0f, 0.0f);
-  delay_gyro(200);
-
-  // 2. Paramètres du triangle
-  const float ANGLE_MAX    = 10.66f;   // demi-angle du triangle (°) → base ≈ 50mm
-  const float PAS_ANGLE    = 1.2f;     // pas entre passes (°) → ~3mm de stylo
-  const float HAUTEUR_MAX  = 50.0f;    // profondeur max de ligne (mm) au centre
-
-  // Pré-calcul de la constante pour bords droits
-  const float THETA_MAX_RAD = ANGLE_MAX * PI / 180.0f;
-  const float R_TIP = PEN_OFFSET_MM - HAUTEUR_MAX;  // 135 - 50 = 85mm
-  const float COS_MAX = cos(THETA_MAX_RAD);
-  const float SIN_MAX = sin(THETA_MAX_RAD);
-  // Pente : relie la pointe (r=85, θ=0) au coin de base (r=135, θ=±max)
-  const float SLOPE = (PEN_OFFSET_MM * COS_MAX - R_TIP) / (PEN_OFFSET_MM * SIN_MAX);
-
-  // 3. Pivoter au bord pour commencer le balayage
-  seq_pivot_absolu(-ANGLE_MAX);
-
-  // 4. Balayage gauche → droite (remplit le triangle)
-  for (float capActuel = -ANGLE_MAX; capActuel <= ANGLE_MAX; capActuel += PAS_ANGLE) {
-    seq_pivot_absolu(capActuel);
-
-    // Formule corrigée pour bords droits du triangle
-    float theta_rad = fabs(capActuel) * PI / 180.0f;
-    float denom = cos(theta_rad) - SLOPE * sin(theta_rad);
-    float longueurLigne = 0.0f;
-    if (denom > 0.01f) {
-      longueurLigne = PEN_OFFSET_MM - R_TIP / denom;
-    }
-
-    // Sécurité : borner entre 0 et HAUTEUR_MAX
-    longueurLigne = constrain(longueurLigne, 0.0f, HAUTEUR_MAX);
-
-    if (longueurLigne > 3.0f) {
-      seq_avancer_asservi(longueurLigne, capActuel);
-      seq_reculer_asservi(longueurLigne, capActuel);
-    }
-  }
-
-  // 5. Revenir au centre (cap Nord)
-  seq_pivot_absolu(0.0f);
 }
 
 // ==============================================================================
