@@ -324,12 +324,11 @@ static void seq_majGyro() {
 // Correction P sur le différentiel d'encodeurs pour compenser la dérive.
 // STOP_THRESHOLD : distance d'anticipation pour absorber l'inertie (à calibrer).
 static void seq_avancer(float distanceMm) {
-  for (int i = 0; i < 20; i++) { seq_majGyro(); delay(5); }  // 100ms stabilisation active
   resetAutoEncoders();
 
   const float STOP_THRESHOLD = -10.0f;
   const int   BASE_SPEED     = 150;
-  const float KP_GYRO        = 20.0f;  // correction agressive pour aligner immédiatement
+  const float KP_GYRO        = 8.0f;  // correction vers cap absolu 0°
 
   while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
     seq_majGyro();
@@ -524,8 +523,7 @@ static void seq_marche() {
   resetAutoEncoders();
   avancerMoteurs(SPEED_REPO_FAST, SPEED_REPO_SLOW);
   while (autoTicsG < TICKS_REPO) { seq_majGyro(); server.handleClient(); delay(5); }
-  arreterMoteurs();
-  for (int i = 0; i < 50; i++) { seq_majGyro(); delay(5); }  // 250ms actif
+  // PAS d'arrêt moteurs : on enchaîne directement avec seq_avancer()
 }
 
 // ==============================================================================
@@ -543,7 +541,7 @@ void drawStairs() {
 
   seq_avancer(200.0f);  // segment 1 : 20 cm
   seq_marche();         // marche : arc ~10cm + correction
-  seq_avancer(260.0f);  // segment 3 : 26 cm (repo 14 + seg3 26 = 40 cm total)
+  seq_avancer(260.0f);  // segment 3 : 26 cm (repo ~14 + seg3 26 = 40 cm total)
 
   marquerPoint();        // ET1.1 : marquage arrivée
 
