@@ -532,8 +532,9 @@ static void seq_orienterNord() {
   seq3Print("CAP INITIAL : " + String(cap, 1) + " deg");
 
   // cap = angle entre l'avant du robot et le Nord  (0° = déjà face au Nord)
-  // Pour tourner vers Nord : on pivote de -cap
-  float correction = -cap;
+  // Convention LIS3MDL monté sur ce robot : tourner à droite fait BAISSER le cap
+  // → correction = cap (pas -cap) : positif = gauche, négatif = droite
+  float correction = cap;
   while (correction >  180.0f) correction -= 360.0f;
   while (correction < -180.0f) correction += 360.0f;
 
