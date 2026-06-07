@@ -615,60 +615,28 @@ static void seq_pivotAngleDroit(float angleDeg) {
 }
 
 // ==============================================================================
-// FLECHE NORD : hampe 40mm (obligatoire) + triangle isocele (périmètre)
+// FLECHE NORD : trait 40mm plein Nord + marquage final gauche/droite
 //
-// Géométrie (stylo ne se lève jamais) :
-//
-//           C  ← apex (pointe Nord)
-//          / \
-//   44.7mm/   \44.7mm    (hypoténuse = √(20²+40²))
-//        /     \
-//       B       D  ← fin du tracé
-//  20mm |
-//       A  ← arrivée tige, pivot D 90°
-//       |
-//  40mm |  tige plein Nord (obligatoire)
-//       |
-//  [DÉPART — robot face au Nord après seq_orienterNord()]
-//
-// Angles de virage (pivot sur place, encodeurs purs) :
-//   A→B : pivot DROIT  90°       (face Est vers coin base-droit)
-//   B→C : pivot GAUCHE 116.57°   (= 90° + arctan(20/40) = 90° + 26.57°)
-//   C→D : pivot GAUCHE 126.86°   (= 180° − 2×26.57°  — angle au sommet)
-//
-// Conversion angle→ticks : ticks = angle × TICKS_90 / 90
-// TICKS_90 = 198 (calibré, validé à 90° pile)
+// [1] Avancer 40mm plein Nord (tige obligatoire)
+// [2] Petit pivot gauche 20° — marque l'arrêt
+// [3] Petit pivot droit 40° — revient et dépasse de 20° de l'autre côté
+// [4] Petit pivot gauche 20° — retour face Nord
 // ==============================================================================
-#define FLECHE_HAMPE_MM  40.0f
-#define TRI_DEMI_BASE    20.0f
-#define TRI_COTE_MM      44.72f
-#define TRI_ANGLE_BASE   116.57f  // angle de virage aux coins de la base
-#define TRI_ANGLE_APEX   126.86f  // angle de virage au sommet
+#define FLECHE_HAMPE_MM   40.0f
+#define FLECHE_MARQUE_DEG 20.0f   // amplitude du zigzag de marquage
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // [1] Tige plein Nord — 40 mm obligatoire
-  seq3Print("Fleche [1/5] : tige 40mm...");
+  // [1] Trait plein Nord — 40 mm
+  seq3Print("Fleche [1/2] : trait 40mm plein Nord...");
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // [2] Pivot droit 90° → face Est (vers coin base-droit)
-  seq3Print("Fleche [2/5] : pivot D 90deg...");
-  seq_pivotAngleDroit(90.0f);
-
-  // [3] Demi-base droite — 20 mm
-  seq3Print("Fleche [3/5] : demi-base 20mm...");
-  seq_avancer(TRI_DEMI_BASE);
-
-  // [4] Pivot gauche 116.57° + côté droit vers l'apex — 44.72 mm
-  seq3Print("Fleche [4/5] : pivot G 116.57deg + cote 44.72mm...");
-  seq_pivotAngleGauche(TRI_ANGLE_BASE);
-  seq_avancer(TRI_COTE_MM);
-
-  // [5] Pivot gauche 126.86° + côté gauche depuis l'apex — 44.72 mm
-  seq3Print("Fleche [5/5] : pivot G 126.86deg + cote 44.72mm...");
-  seq_pivotAngleGauche(TRI_ANGLE_APEX);
-  seq_avancer(TRI_COTE_MM);
+  // [2] Marquage final : petit gauche-droite-gauche
+  seq3Print("Fleche [2/2] : marquage gauche-droite...");
+  seq_pivotAngleGauche(FLECHE_MARQUE_DEG);        // petit gauche
+  seq_pivotAngleDroit(FLECHE_MARQUE_DEG * 2.0f);  // retour + même amplitude à droite
+  seq_pivotAngleGauche(FLECHE_MARQUE_DEG);         // retour face Nord
 }
 
 // ==============================================================================
