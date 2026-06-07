@@ -50,6 +50,14 @@ float magOffsetY   = 0.0f;
 bool  magCalibrated = false;
 #define MOUNTING_OFFSET 0.0f  // décalage montage LIS3MDL → ajuster si Nord décalé au premier test
 
+// Log debug séquence 3 — récupérable via /seq3log depuis le dashboard WiFi
+String seq3Log = "Aucun essai encore.";
+
+void seq3Print(String msg) {
+  seq3Log += msg + "\n";
+  Serial.println(msg);
+}
+
 // --- ODOMÉTRIE CUMULÉE ---
 float posX = 0.0, posY = 0.0;
 float thetaEnc = 0.0;
@@ -447,7 +455,7 @@ static void seq_reculer(float distanceMm) {
 #define SPEED_CALIB 110  // vitesse réduite pour maximiser la précision
 
 void calibrerMagnetometre() {
-  Serial.println("CALIB MAG : début spin 360°...");
+  seq3Print("CALIB MAG : debut spin 360...");
 
   float mxMin = 1e9f, mxMax = -1e9f;
   float myMin = 1e9f, myMax = -1e9f;
@@ -481,8 +489,9 @@ void calibrerMagnetometre() {
   magOffsetY = (myMin + myMax) / 2.0f;
   magCalibrated = true;
 
-  Serial.printf("CALIB MAG OK | offX=%.2f offY=%.2f\n", magOffsetX, magOffsetY);
-  Serial.printf("  mxMin=%.2f mxMax=%.2f myMin=%.2f myMax=%.2f\n", mxMin, mxMax, myMin, myMax);
+  seq3Print("CALIB OK offX=" + String(magOffsetX, 2) + " offY=" + String(magOffsetY, 2));
+  seq3Print("  mxMin=" + String(mxMin,2) + " mxMax=" + String(mxMax,2)
+          + " myMin=" + String(myMin,2) + " myMax=" + String(myMax,2));
 }
 
 // ==============================================================================
@@ -520,7 +529,7 @@ float mesurerCap() {
 // ==============================================================================
 static void seq_orienterNord() {
   float cap = mesurerCap();
-  Serial.printf("CAP INITIAL : %.1f deg\n", cap);
+  seq3Print("CAP INITIAL : " + String(cap, 1) + " deg");
 
   // cap = angle entre l'avant du robot et le Nord  (0° = déjà face au Nord)
   // Pour tourner vers Nord : on pivote de -cap
@@ -531,7 +540,7 @@ static void seq_orienterNord() {
   // Nombre de ticks proportionnel à TICKS_90
   long ticks = (long)(fabs(correction) * TICKS_90 / 90.0f);
 
-  Serial.printf("CORRECTION : %.1f deg → %ld ticks\n", correction, ticks);
+  seq3Print("CORRECTION : " + String(correction, 1) + " deg -> " + String(ticks) + " ticks");
 
   if (ticks < 3) return;  // déjà dans la tolérance
 
@@ -545,7 +554,7 @@ static void seq_orienterNord() {
 
   // Vérification finale
   float capFinal = mesurerCap();
-  Serial.printf("CAP FINAL  : %.1f deg\n", capFinal);
+  seq3Print("CAP FINAL  : " + String(capFinal, 1) + " deg");
 }
 
 // ==============================================================================
@@ -617,19 +626,19 @@ static void seq_flecheNord() {
 // ==============================================================================
 void drawNorthArrow() {
   sequenceEnCours = true;
+  seq3Log = "";   // reset log à chaque essai
 
-  Serial.println("SEQ3 : début calibration magnétomètre...");
+  seq3Print("=== SEQ3 DEBUT ===");
   calibrerMagnetometre();
 
-  Serial.println("SEQ3 : orientation vers le Nord...");
   seq_orienterNord();
 
-  Serial.println("SEQ3 : dessin flèche Nord...");
+  seq3Print("=== FLECHE ===");
   seq_flecheNord();
 
   arreterMoteurs();
   sequenceEnCours = false;
-  Serial.println("SEQ3 : terminé.");
+  seq3Print("=== SEQ3 FIN ===");
 }
 
 // ==============================================================================
@@ -861,10 +870,12 @@ const char index_html[] PROGMEM = R"rawliteral(
         <h3>Séquences de dessin</h3>
         <button class="btn-sequence" onclick="lancerSequence(1)">Séquence 1 - Escalier</button>
         <button class="btn-sequence" style="background:#27ae60;" onclick="lancerSequence(3)">Séquence 3 - Flèche Nord</button>
+        <button class="btn-sequence" style="background:#555; font-size:13px; padding:8px 16px;" onclick="voirDebugSeq3()">📋 Voir debug</button>
         <div id="mag-status" style="margin-top:6px; font-size:13px; color:#555;">
           Cap magnétique : <span id="heading-val" style="font-weight:bold; color:#27ae60;">--°</span>
           &nbsp;|&nbsp; Calibration : <span id="mag-cal" style="font-weight:bold; color:#e67e22;">NON</span>
         </div>
+        <pre id="seq3-debug" style="display:none; text-align:left; background:#202124; color:#8ab4f8; font-size:12px; padding:10px; border-radius:8px; margin-top:8px; max-height:200px; overflow-y:auto; white-space:pre-wrap;"></pre>
         <hr style="margin:15px 0; border-color:#eee;">
         <b style="color:#555; font-size:14px;">Calibration</b><br>
         <button class="btn-sequence" style="background:#e67e22;" onclick="lancerTest('distance')">Test Distance (1000 ticks)</button>
@@ -961,6 +972,14 @@ const char index_html[] PROGMEM = R"rawliteral(
             fetch('/ping').then(() => log("Réseau OK", "sys"));
             setInterval(fetchTelemetry, 500);
         };
+
+        function voirDebugSeq3() {
+            fetch('/seq3log').then(r => r.text()).then(txt => {
+                const el = document.getElementById('seq3-debug');
+                el.innerText = txt;
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            });
+        }
 
         function lancerSequence(num) {
             document.getElementById('seq-status').innerText = "Séquence " + num + " en cours...";
@@ -1093,8 +1112,12 @@ void handleSequence3() {
     server.send(409, "text/plain", "Séquence déjà en cours");
     return;
   }
-  server.send(200, "text/plain", "Flèche Nord lancée (calib + pivot + dessin)");
+  server.send(200, "text/plain", "Fleche Nord lancee (calib + pivot + dessin)");
   drawNorthArrow();
+}
+
+void handleSeq3Log() {
+  server.send(200, "text/plain; charset=utf-8", seq3Log);
 }
 
 void handleTest() {
@@ -1157,6 +1180,7 @@ void setup() {
   server.on("/telemetry", handleTelemetry);
   server.on("/sequence1", handleSequence1);
   server.on("/sequence3", handleSequence3);
+  server.on("/seq3log",   handleSeq3Log);
   server.on("/test", handleTest);
   server.on("/stop", handleStop);
   server.begin();
