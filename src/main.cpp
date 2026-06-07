@@ -636,8 +636,10 @@ static void seq_flecheNord() {
 // SÉQUENCE 3 : FLÈCHE NORD COMPLÈTE
 //   Étape 1 — calibration hard-iron (spin 360° lent)
 //   Étape 2 — orienter le robot face au Nord (pivot encodeur)
-//   Étape 3 — dessiner la flèche vers l'avant
+//   Étape 3 — dessiner la flèche remplie (balayage polaire)
 // ==============================================================================
+void sequence3_FlecheNord();  // forward declaration
+
 void drawNorthArrow() {
   sequenceEnCours = true;
   seq3Log = "";   // reset log à chaque essai
@@ -647,12 +649,123 @@ void drawNorthArrow() {
 
   seq_orienterNord();
 
-  seq3Print("=== FLECHE ===");
-  seq_flecheNord();
+  seq3Print("=== FLECHE (balayage polaire) ===");
+  sequence3_FlecheNord();
 
   arreterMoteurs();
   sequenceEnCours = false;
   seq3Print("=== SEQ3 FIN ===");
+}
+
+// ==============================================================================
+// SÉQUENCE 3 : BALAYAGE POLAIRE — remplissage du triangle (pointe de flèche)
+// Le bras de 135mm (PEN_OFFSET) sert de levier pour décaler le feutre
+// latéralement par micro-pivots de ~1.2°.
+// Triangle isocèle : base=50mm, hauteur=50mm, ~18 passes aller-retour.
+// ==============================================================================
+
+// Délai actif (maintient l'intégration gyro)
+static void delay_gyro(int ms) {
+  int iterations = ms / 5;
+  for (int i = 0; i < iterations; i++) { seq_majGyro(); delay(5); }
+}
+
+// Pivot vers un cap absolu (gyro). Précis pour micro-pivots.
+static void seq_pivot_absolu(float capCible) {
+  const int   SPEED_MICRO_PIVOT = 95;
+  const float TOLERANCE_ANGLE   = 0.5f;
+  const unsigned long TIMEOUT   = 3000;
+
+  unsigned long startTime = millis();
+
+  while (true) {
+    seq_majGyro();
+    float erreur = capCible - angleZ;
+
+    if (abs(erreur) <= TOLERANCE_ANGLE) break;
+    if (millis() - startTime > TIMEOUT) break;
+
+    if (erreur > 0) {
+      tournerDroite(SPEED_MICRO_PIVOT);
+    } else {
+      tournerGauche(SPEED_MICRO_PIVOT);
+    }
+
+    server.handleClient();
+    delay(2);
+  }
+  arreterMoteurs();
+  delay_gyro(100);
+}
+
+// Avance en maintenant un cap absolu donné
+static void seq_avancer_asservi(float distanceMm, float capCible) {
+  resetAutoEncoders();
+
+  const float STOP_THRESHOLD = -5.0f;
+  const int   BASE_SPEED     = 120;
+  const float KP_GYRO        = 8.0f;
+
+  while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
+    seq_majGyro();
+    int correction = (int)(-KP_GYRO * (angleZ - capCible));
+    int leftSpeed  = constrain(BASE_SPEED + correction, 70, 255);
+    int rightSpeed = constrain(BASE_SPEED - correction, 70, 255);
+    avancerMoteurs(leftSpeed, rightSpeed);
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay_gyro(100);
+}
+
+// Recule en maintenant un cap absolu donné
+static void seq_reculer_asservi(float distanceMm, float capCible) {
+  resetAutoEncoders();
+
+  const float STOP_THRESHOLD = -5.0f;
+  const int   BASE_SPEED     = 120;
+  const float KP_GYRO        = 8.0f;
+
+  while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
+    seq_majGyro();
+    float erreur = angleZ - capCible;
+    int correction = (int)(KP_GYRO * erreur);
+    int leftSpeed  = constrain(BASE_SPEED - correction, 70, 255);
+    int rightSpeed = constrain(BASE_SPEED + correction, 70, 255);
+    reculerMoteurs(leftSpeed, rightSpeed);
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay_gyro(150);
+}
+
+// Balayage polaire — dessine le triangle rempli
+void sequence3_FlecheNord() {
+  seq_resetGyro();  // cap 0° = Nord (robot déjà aligné)
+
+  const float ANGLE_MAX    = 10.66f;
+  const float PAS_ANGLE    = 1.2f;
+  const float HAUTEUR_MAX  = 50.0f;
+
+  // 1. Aller au bord gauche
+  seq_pivot_absolu(-ANGLE_MAX);
+
+  // 2. Balayage gauche → droite
+  for (float capActuel = -ANGLE_MAX; capActuel <= ANGLE_MAX; capActuel += PAS_ANGLE) {
+    seq_pivot_absolu(capActuel);
+
+    float longueurLigne = HAUTEUR_MAX * (1.0f - (abs(capActuel) / ANGLE_MAX));
+
+    if (longueurLigne > 3.0f) {
+      seq_avancer_asservi(longueurLigne, capActuel);
+      seq_reculer_asservi(longueurLigne, capActuel);
+    }
+  }
+
+  // 3. Revenir au centre (cap Nord)
+  seq_pivot_absolu(0.0f);
 }
 
 // ==============================================================================
