@@ -818,110 +818,189 @@ void drawStairs() {
 }
 
 // ==============================================================================
-// SÉQUENCE 2 : CERCLE  (logique reprise du projet de l'équipe)
+// SÉQUENCE 2 : LE CERCLE
 //
-// CHANGEMENT CLÉ vs l'ancienne version :
-//   La FERMETURE du cercle n'est plus mesurée au gyroscope (qui dérive et finit
-//   par ne plus se refermer) mais par la DIFFÉRENCE des encodeurs G/D.
-//   Quand le robot a tourné de 360°, l'écart (autoTicsG - autoTicsD) atteint une
-//   valeur FIXE, indépendante du rayon :
+// L'utilisateur demande un rayon de tracé du STYLO (cm). Le stylo est déporté
+// de D_PEN EN AVANT de l'axe des roues : le centre de l'essieu décrit donc un
+// cercle plus petit, de rayon  Rc = sqrt(rayon_stylo² − D_PEN²)  (Pythagore).
 //
-//        cible_diff_tics = entraxe * 2*PI / mm_par_tick
+// Principe (repris du modèle, adapté À NOS paramètres) :
+//   - roue extérieure (gauche) à vitesse fixe ;
+//   - roue intérieure (droite) asservie en P pour tenir le ratio des rayons ;
+//   - fin du cercle quand l'écart d'encodeurs atteint 2π·ENTRAXE, ce qui
+//     correspond TOUJOURS à 360° de rotation (la boucle se referme quel que
+//     soit le rayon réellement tracé).
 //
-//   Tant que |autoTicsG - autoTicsD| < cible, on trace ; ensuite on ferme.
-//   -> insensible à la dérive, fermeture garantie à 360°.
-//
-// GÉOMÉTRIE (stylo déporté ~13 cm en avant de l'axe des roues) :
-//        Rc    = sqrt(rayon_stylo^2 - D_PEN^2)      (rayon du centre des roues)
-//        ratio = (Rc + E/2) / (Rc - E/2)            (rapport des vitesses)
-//   Roue extérieure (gauche) à PWM fixe ; roue intérieure (droite) asservie par
-//   un correcteur proportionnel (Kp) pour tenir ce ratio.
-//
-// NB CALIBRATION : la cible de fermeture est calculée à partir de TES constantes
-//   (ENTRAXE_MM, MM_PAR_TICK -> 857 ticks/tour). Les petites corrections par
-//   rayon ci-dessous ont été calées sur le robot de l'équipe : à réajuster au besoin.
+// Toutes les constantes sont dérivées des #define physiques en haut du fichier
+// (PEN_OFFSET_MM, ENTRAXE_MM, MM_PAR_TICK) : aucune valeur en dur d'un autre robot.
 // ==============================================================================
-
-#define CERCLE_SEUIL_PIVOT 15.0f   // conservé : utilisé par handleSequence2 (message d'état)
-
+// NOTE (mise a jour) : la FERMETURE du cercle se fait desormais par GYROSCOPE
+// (on integre la rotation reelle jusqu'a 360 deg), et NON plus par l'ecart
+// d'encodeurs decrit ci-dessus. Raison : en virage les roues patinent et
+// l'entraxe reel est incertain, donc l'ecart d'encodeurs vise etait atteint
+// AVANT 360 deg -> le robot ne tracait qu'environ 3/4 de demi-cercle.
+// L'asservissement des roues (plus bas) ne sert plus qu'a tenir le RAYON.
 void executerCercle(float rayon_stylo_cm) {
   sequenceEnCours = true;
 
-  // --- Constantes géométriques (reprises du projet de l'équipe) ---
-  const float D_PEN         = 13.0f;   // déport stylo (cm) en avant de l'axe des roues
-  const float ENTRAXE_RAYON = 9.0f;    // entraxe (cm) utilisé pour le ratio des vitesses
+  // --- Paramètres dérivés de NOS constantes physiques ---
+  const float D_PEN       = PEN_OFFSET_MM / 10.0;   // 13.5 cm (déport stylo mesuré)
+  const float ENTRAXE_CM  = ENTRAXE_MM   / 10.0;    // 8.2 cm  (voie centre-à-centre)
+  const float TICS_PAR_CM = 10.0 / MM_PAR_TICK;     // ≈ 30.3 ticks/cm (calibré : 857 t/tour)
 
-  Serial.println("\n=== NOUVEAU CERCLE DEMANDE ===");
-  Serial.print("Rayon recu : "); Serial.println(rayon_stylo_cm);
+  // Rayon stylo minimal traçable : on garde Rc > ENTRAXE/2 (+marge) pour que le
+  // ratio reste positif et la roue intérieure n'ait jamais à reculer.
+  const float RAYON_MIN = sqrt(pow(ENTRAXE_CM / 2.0 + 1.5, 2) + pow(D_PEN, 2)); // ≈ 14.6 cm
 
-  // --- Bouclier anti-crash : évite la racine carrée négative (rayon trop petit) ---
-  if (rayon_stylo_cm <= D_PEN) {
-    Serial.println("Alerte: rayon trop petit -> forcage a 13.5 cm");
-    rayon_stylo_cm = 13.5f;
+  Serial.println("\n=== SEQUENCE 2 : CERCLE ===");
+  Serial.print("Rayon stylo demande (cm) : "); Serial.println(rayon_stylo_cm);
+
+  // --- CALIBRATION EMPIRIQUE DU RAYON (mesure terrain) ---
+  // Le robot trace TROP GRAND (roue interieure bridee par son plancher PWM +
+  // entraxe reel > theorique). Modele lineaire mesure sur le robot :
+  //     rayon_trace = CAL_GAIN * rayon_envoye + CAL_OFFSET
+  //   donnees : 20->22.5 ; 17->20 ; 15->17.75   =>  CAL_GAIN ~= 0.95 , CAL_OFFSET ~= 3.5
+  // On INVERSE le modele pour envoyer le bon rayon a la geometrie.
+  // RECALIBRER : tracer 2 cercles, relever (envoye -> trace), resoudre les
+  // 2 equations a 2 inconnues, puis remplacer CAL_GAIN / CAL_OFFSET ci-dessous.
+  const float CAL_GAIN   = 0.95f;
+  const float CAL_OFFSET = 3.5f;
+  float rayon_cible = rayon_stylo_cm;                         // ce que l'utilisateur veut voir trace
+  rayon_stylo_cm    = (rayon_cible - CAL_OFFSET) / CAL_GAIN;  // ce qu'on envoie reellement
+  Serial.print("Rayon corrige -> envoye geometrie (cm) : "); Serial.println(rayon_stylo_cm);
+
+  // --- Bouclier anti-crash : évite racine carrée négative ET ratio négatif ---
+  if (rayon_stylo_cm < RAYON_MIN) {
+    Serial.print("Rayon hors plage de la methode lisse -> clamp au mini (cm) : ");
+    Serial.println(RAYON_MIN);
+    Serial.println("(pour un cercle plus petit : utiliser le cercle PIVOT ~13.5 cm)");
+    rayon_stylo_cm = RAYON_MIN;
   }
-  float vraie_demande = rayon_stylo_cm;
 
-  // --- Corrections empiriques par rayon (calées sur le robot de l'équipe) ---
-  if (vraie_demande == 16.0f) rayon_stylo_cm = vraie_demande - 0.2f;
-  if (vraie_demande == 17.0f) rayon_stylo_cm = vraie_demande + 0.25f;
-  if (vraie_demande == 18.0f) rayon_stylo_cm = vraie_demande + 0.5f;
-  if (vraie_demande == 20.0f) rayon_stylo_cm = vraie_demande + 1.2f;
-  else if (vraie_demande == 19.0f) rayon_stylo_cm = vraie_demande + 0.65f;
+  // Rayon parcouru par le centre de l'essieu
+  float Rc = sqrt(pow(rayon_stylo_cm, 2) - pow(D_PEN, 2));
 
-  // --- Géométrie du tracé ---
-  float Rc    = sqrt(pow(rayon_stylo_cm, 2) - pow(D_PEN, 2));      // rayon du centre des roues
-  float ratio = (Rc + (ENTRAXE_RAYON / 2.0f)) / (Rc - (ENTRAXE_RAYON / 2.0f));
+  // Ratio des distances : roue extérieure / roue intérieure
+  float ratio = (Rc + ENTRAXE_CM / 2.0) / (Rc - ENTRAXE_CM / 2.0);
 
-  // --- Cible de fermeture : écart de ticks pour 360°, calibré sur CE robot ---
-  // (autoTicsG - autoTicsD) = entraxe * angle(rad) / mm_par_tick ; pour 360° ci-dessous.
-  // Si le cercle se referme un peu trop tôt/tard, ajuste ce facteur (1.0 = théorique).
-  const float CERCLE_FERMETURE_FACTEUR = 1.0f;
-  long cible_diff_tics = (long)(CERCLE_FERMETURE_FACTEUR * ENTRAXE_MM * 2.0f * PI / MM_PAR_TICK);
+  // Écart d'encodeurs à atteindre pour 360° = 2π·ENTRAXE (indépendant du rayon)
+  long cible_diff_tics = (long)(2.0 * PI * ENTRAXE_CM * TICS_PAR_CM);
 
-  // --- Vitesses moteurs (roue extérieure fixe, intérieure asservie) ---
-  int pwmExtBase = 170;   // roue extérieure (gauche)
-  int ajuste     = 30;    // PWM minimal de la roue intérieure (droite)
-  if (rayon_stylo_cm <= 14) { pwmExtBase = 230; ajuste = 20; Serial.println("!!! MODE PIVOT EXTREME !!!"); }
-  if (rayon_stylo_cm <= 15) { pwmExtBase = 220; ajuste = 28; Serial.println("!!! MODE PIVOT EXTREME !!!"); }
-  float Kp = 1.9f;        // gain du correcteur de la roue intérieure
+  // Vitesse roue extérieure + plancher PWM roue intérieure.
+  // Cercle serré (rayon proche du déport) : on pousse l'extérieure et on
+  // abaisse le plancher pour que le ratio puisse être tenu.
+  int pwmExtBase = 180;
+  int ajuste     = 40;                       // plancher PWM intérieure (≈ seuil démarrage moteur, à calibrer)
+  if (rayon_stylo_cm < D_PEN + 3.0) {        // cercle serré (< ~16.5 cm)
+    pwmExtBase = 210;
+    ajuste     = 30;
+  }
+
+  const float Kp = 1.9;                      // gain correcteur roue intérieure (à ajuster sur le terrain)
 
   resetAutoEncoders();
-  Serial.print("Cible de difference de ticks : "); Serial.println(cible_diff_tics);
-  Serial.print("Rc=");      Serial.print(Rc, 2);
-  Serial.print(" ratio="); Serial.println(ratio, 2);
+  Serial.print("Rc(cm)="); Serial.print(Rc, 2);
+  Serial.print(" | ratio="); Serial.print(ratio, 2);
+  Serial.print(" | cible_diff_tics="); Serial.println(cible_diff_tics);
   Serial.println("--- DEPART MOTEURS ---");
 
-  // --- Boucle de tracé : on tourne jusqu'à 360° (écart d'encodeurs atteint) ---
+  // Fermeture par GYROSCOPE : on integre la rotation reelle (axe Z) jusqu'a 360 deg.
+  // Insensible au glissement des roues et a l'incertitude sur l'entraxe
+  // -> la boucle se referme correctement, contrairement a la methode par encodeurs.
+  const float ANGLE_CIBLE        = 365.0;   // un tour complet
+  const unsigned long TIMEOUT_MS = 30000;   // securite anti-boucle-infinie (~6x la duree normale)
+  float angleParcouru = 0.0;
   unsigned long chronoReseau = millis();
-  while (abs(autoTicsG - autoTicsD) < cible_diff_tics) {
-    // On n'interroge le Wi-Fi que toutes les 50 ms (sinon ça hache le tracé)
+  unsigned long tGyro        = millis();
+  unsigned long tDebut       = millis();
+
+  while (fabs(angleParcouru) < ANGLE_CIBLE) {
+    // Lecture gyro + integration de l'angle reellement tourne
+    sensors_event_t aEvt, gEvt, tEvt;
+    lsm6ds3.getEvent(&aEvt, &gEvt, &tEvt);
+    unsigned long nowGyro = millis();
+    float dtGyro = (nowGyro - tGyro) / 1000.0f;
+    if (dtGyro > 0.1f) dtGyro = 0.1f;        // anti-saut si la boucle a ete interrompue
+    tGyro = nowGyro;
+    angleParcouru += gEvt.gyro.z * (180.0f / PI) * dtGyro;
+
+    // Securite : arret si le gyro ne voit jamais 360 deg (capteur muet, blocage moteur...)
+    if (millis() - tDebut > TIMEOUT_MS) {
+      Serial.println("!!! TIMEOUT SECURITE (gyro suspect ?) -> arret !!!");
+      break;
+    }
+    // On n'interroge le Wi-Fi que toutes les 50 ms (timing serré de la boucle)
     if (millis() - chronoReseau > 50) {
       server.handleClient();
       chronoReseau = millis();
     }
-    if (!sequenceEnCours) {            // STOP envoyé depuis l'interface web
-      Serial.println("!!! ARRET D'URGENCE VIA WIFI !!!");
+    if (!sequenceEnCours) {                  // arrêt d'urgence (bouton STOP)
+      Serial.println("!!! ARRET D'URGENCE !!!");
       break;
     }
 
-    // Asservissement proportionnel de la roue intérieure pour tenir le ratio
-    float tics_D_cible  = autoTicsG / ratio;
-    float erreur        = tics_D_cible - (float)autoTicsD;
-    int   pwmInt_Ajuste = (pwmExtBase / ratio) + (Kp * erreur);
-    pwmInt_Ajuste       = constrain(pwmInt_Ajuste, ajuste, 255);
+    // Asservissement P : la roue intérieure (D) suit  G / ratio
+    float tics_D_cible = autoTicsG / ratio;
+    float erreur       = tics_D_cible - (float)autoTicsD;
+    int   pwmInt       = (int)(pwmExtBase / ratio + Kp * erreur);
+    pwmInt = constrain(pwmInt, ajuste, 255);
 
-    // Affichage direct dans le moniteur série (debug)
-    Serial.print("Tics_G: ");    Serial.print(autoTicsG);
-    Serial.print(" | Tics_D: "); Serial.print(autoTicsD);
-    Serial.print(" | Erreur: "); Serial.print(erreur);
-    Serial.print(" | PWM D: ");  Serial.println(pwmInt_Ajuste);
-
-    avancerMoteurs(pwmExtBase, pwmInt_Ajuste);
+    avancerMoteurs(pwmExtBase, pwmInt);      // G = extérieure (rapide), D = intérieure (asservie)
     delay(10);
   }
 
-  Serial.println("=== FIN DU CERCLE ===");
   arreterMoteurs();
+  Serial.print("=== FIN DU CERCLE | angle gyro mesure = ");
+  Serial.print(angleParcouru, 1); Serial.println(" deg ===");
+  if (sequenceEnCours) delay(500);
+  resetAutoEncoders();
+  sequenceEnCours = false;
+}
+
+// ==============================================================================
+// CERCLE MINIMAL : PIVOT SUR PLACE  (rayon trace = deport stylo D_PEN ~13.5 cm)
+//
+// Quand le robot pivote sur lui-meme autour du centre de l'essieu, le stylo
+// (place D_PEN EN AVANT) decrit un cercle PARFAIT de rayon exactement D_PEN.
+// C'est le PLUS PETIT cercle propre que cette geometrie autorise : aucun reglage
+// logiciel ne permet de descendre sous D_PEN tant que le stylo est si en avant.
+// Fermeture par gyroscope a 360 deg (comme la methode lisse).
+// ==============================================================================
+void executerCerclePivot() {
+  sequenceEnCours = true;
+  Serial.println("\n=== CERCLE PIVOT (rayon = deport stylo ~13.5 cm) ===");
+
+  const float ANGLE_CIBLE        = 360.0;
+  const unsigned long TIMEOUT_MS = 30000;
+  const int  SPEED_PIVOT_CERCLE  = 130;     // vitesse de pivot (a ajuster si besoin)
+  float angleParcouru = 0.0;
+
+  resetAutoEncoders();
+  unsigned long chronoReseau = millis();
+  unsigned long tGyro        = millis();
+  unsigned long tDebut       = millis();
+
+  while (fabs(angleParcouru) < ANGLE_CIBLE) {
+    // Integration gyro (rotation reelle)
+    sensors_event_t aEvt, gEvt, tEvt;
+    lsm6ds3.getEvent(&aEvt, &gEvt, &tEvt);
+    unsigned long nowGyro = millis();
+    float dtGyro = (nowGyro - tGyro) / 1000.0f;
+    if (dtGyro > 0.1f) dtGyro = 0.1f;
+    tGyro = nowGyro;
+    angleParcouru += gEvt.gyro.z * (180.0f / PI) * dtGyro;
+
+    if (millis() - tDebut > TIMEOUT_MS) { Serial.println("!!! TIMEOUT PIVOT !!!"); break; }
+    if (millis() - chronoReseau > 50)  { server.handleClient(); chronoReseau = millis(); }
+    if (!sequenceEnCours)              { Serial.println("!!! ARRET D'URGENCE !!!"); break; }
+
+    tournerDroite(SPEED_PIVOT_CERCLE);      // pivot sur place (G avant, D arriere)
+    delay(10);
+  }
+
+  arreterMoteurs();
+  Serial.print("=== FIN CERCLE PIVOT | angle gyro mesure = ");
+  Serial.print(angleParcouru, 1); Serial.println(" deg ===");
   if (sequenceEnCours) delay(500);
   resetAutoEncoders();
   sequenceEnCours = false;
@@ -995,7 +1074,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         <button class="btn-sequence" onclick="lancerSequence(1)">Séquence 1 - Escalier</button>
         <div style="margin-top:12px;">
             <label style="font-size:14px; color:#555;">Rayon stylo (cm) :</label>
-            <input type="number" id="rayonCercle" value="20" min="2" max="20" step="0.5"
+            <input type="number" id="rayonCercle" value="20" min="13" step="0.5"
                    style="width:70px; padding:8px; font-size:16px; text-align:center;">
             <button class="btn-sequence" onclick="lancerCercle()">Séquence 2 - Cercle</button>
         </div>
@@ -1258,23 +1337,28 @@ void handleSequence2() {
     return;
   }
 
-  float rayon = 20.0;
+  float rayon = 20.0;                          // rayon stylo par défaut (cm)
   if (server.hasArg("r")) rayon = server.arg("r").toFloat();
 
-  // Plage cahier des charges : 2 a 20 cm
-  if (rayon < 2.0f || rayon > 20.0f) {
-    server.send(400, "text/plain", "Rayon hors plage (2-20 cm)");
+  // Routage selon le rayon demande (stylo a ~13.5 cm EN AVANT de l'axe des roues) :
+  const float D_PEN = PEN_OFFSET_MM / 10.0;    // 13.5 cm
+  if (rayon < D_PEN - 1.0) {                   // < ~12.5 cm
+    // Plus petit que le deport stylo : geometriquement impossible en cercle propre.
+    server.send(400, "text/plain",
+      "Rayon < 12.5 cm impossible : le stylo est a 13.5 cm en avant de l'axe. "
+      "Rapprocher le stylo de l'axe des roues pour des cercles plus petits.");
+    return;
+  }
+  if (rayon <= 15.0) {
+    // Zone du plus petit cercle propre -> PIVOT sur place (trace ~13.5 cm).
+    server.send(200, "text/plain", "Cercle PIVOT (~13.5 cm) lance");
+    executerCerclePivot();
     return;
   }
 
-  // Limite physique : sous le seuil le robot ne peut que pivoter (trace ~13.5 cm).
-  // On accepte la demande mais on indique le mode utilise.
-  if (rayon < CERCLE_SEUIL_PIVOT) {
-    server.send(200, "text/plain", "Rayon < " + String(CERCLE_SEUIL_PIVOT, 0) + " cm -> PIVOT (trace ~13.5 cm) lance");
-  } else {
-    server.send(200, "text/plain", "Cercle r=" + String(rayon, 1) + " cm lance");
-  }
-  executerCercle(rayon);
+  // Rayon > 15 cm : methode lisse (differentiel) avec calibration du rayon.
+  server.send(200, "text/plain", "Cercle r=" + String(rayon, 1) + " cm lance");
+  executerCercle(rayon);                       // bloquant ; calibre + clampe si besoin
 }
 
 void handleSequence3() {
