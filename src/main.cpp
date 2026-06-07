@@ -574,24 +574,26 @@ static void seq_orienterNord() {
 // ==============================================================================
 // FLÈCHE NORD — TRIANGLE PLEIN PAR BALAYAGE EN ÉVENTAIL
 //
-// Géométrie (triangle isocèle pointe vers le Nord) :
+// Le robot part de la BASE du triangle (position de départ), avance vers
+// la POINTE pour chaque ligne, puis recule au point de départ.
+// En dernier il avance la hampe pour tracer la tige.
+//
+// Géométrie :
 //   Hampe         : FLECHE_HAMPE_MM = 40 mm
 //   Demi-angle    : HALF_ANGLE      = 35°
 //   Base          : 2 × 40 × tan(35°) ≈ 56 mm
 //
-// Algorithme depuis la POINTE :
-//   Pour i = 1..N_LIGNES côté gauche :
-//     1. Pivot gauche de STEP_DEG supplémentaire (encodeur pur)
-//     2. Recule L(i) = HAMPE / cos(i × STEP_DEG)  → trace la ligne
-//     3. Avance L(i)                               → revient à la pointe
-//   Pivot droit pour annuler toute l'inclinaison gauche
-//   Symétrique côté droit
-//   Pivot gauche pour revenir face au Nord
-//   Recule HAMPE → trace la hampe
+// Algorithme depuis la BASE (position initiale du robot) :
+//   Pivot à +HALF_ANGLE (bord gauche du triangle)
+//   Pour i = N_LIGNES..0 :
+//     1. Pivoter vers l'angle i*STEP_DEG
+//     2. Avancer L(i) = HAMPE / cos(i*STEP_DEG)  → trace vers la pointe
+//     3. Reculer L(i)                             → revient à la base
+//   Revenir face au Nord
+//   Avancer HAMPE → trace la hampe vers le Nord
 //
-// Bordures droites : tous les points d'arrivée ont la même coordonnée
-//   y = −L(i)·cos(θ) = −HAMPE (constante) → base horizontale garantie.
-// Couverture  : 9 lignes × 3.9° → espacement ~3.5 mm → >80% avec feutre 2 mm
+// Bordures droites : L(i)·cos(θ) = HAMPE = constante → base horizontale.
+// Couverture : 9 lignes × 3.9° → espacement ~3.5 mm → >80% avec feutre 2 mm
 // ==============================================================================
 #define FLECHE_HAMPE_MM 40.0f
 #define HALF_ANGLE      35.0f
@@ -613,47 +615,50 @@ static void seq_pivotAngleDroit(float angleDeg) {
 }
 
 static void seq_flecheNord() {
-  // ---- 1. HAMPE : avancer jusqu'à la pointe ----
   seq_resetGyro();
-  seq_avancer(FLECHE_HAMPE_MM);
 
-  // ---- 2. CÔTÉ GAUCHE ----
-  float angleAccumG = 0.0f;
-  for (int i = 1; i <= N_LIGNES; i++) {
+  // ---- 1. CÔTÉ GAUCHE : pivot vers bord gauche puis balayage vers le Nord ----
+  // On part face au Nord, on tourne à gauche de HALF_ANGLE (bord gauche)
+  seq_pivotAngleGauche(HALF_ANGLE);
+
+  float angleAccumG = HALF_ANGLE;
+  // Balayage de gauche vers le centre : angle décroît de HALF_ANGLE à 0
+  for (int i = N_LIGNES; i >= 0; i--) {
     float angleCible = i * STEP_DEG;
-    seq_pivotAngleGauche(angleCible - angleAccumG);
+    float delta = angleAccumG - angleCible;   // toujours positif → pivot droit
+    if (delta > 0.5f) seq_pivotAngleDroit(delta);
     angleAccumG = angleCible;
 
-    // Longueur exacte pour que le bout de la ligne tombe sur la base droite
     float angleRad = angleCible * PI / 180.0f;
     float longueur = FLECHE_HAMPE_MM / cos(angleRad);
 
-    seq_reculer(longueur);   // trace la ligne vers la base
-    seq_avancer(longueur);   // revient à la pointe
+    seq_avancer(longueur);   // avance vers la pointe → trace la ligne
+    seq_reculer(longueur);   // revient à la base
   }
 
-  // Retour face au Nord
-  seq_pivotAngleDroit(angleAccumG);
+  // Ici angleAccumG == 0 → robot face au Nord, à la base du triangle
 
-  // ---- 3. CÔTÉ DROIT ----
-  float angleAccumD = 0.0f;
-  for (int i = 1; i <= N_LIGNES; i++) {
+  // ---- 2. CÔTÉ DROIT : pivot vers bord droit puis balayage vers le Nord ----
+  seq_pivotAngleDroit(HALF_ANGLE);
+
+  float angleAccumD = HALF_ANGLE;
+  for (int i = N_LIGNES; i >= 0; i--) {
     float angleCible = i * STEP_DEG;
-    seq_pivotAngleDroit(angleCible - angleAccumD);
+    float delta = angleAccumD - angleCible;   // toujours positif → pivot gauche
+    if (delta > 0.5f) seq_pivotAngleGauche(delta);
     angleAccumD = angleCible;
 
     float angleRad = angleCible * PI / 180.0f;
     float longueur = FLECHE_HAMPE_MM / cos(angleRad);
 
-    seq_reculer(longueur);
     seq_avancer(longueur);
+    seq_reculer(longueur);
   }
 
-  // Retour face au Nord
-  seq_pivotAngleGauche(angleAccumD);
+  // Robot face au Nord, à la base du triangle
 
-  // ---- 4. HAMPE : recule pour tracer la tige ----
-  seq_reculer(FLECHE_HAMPE_MM);
+  // ---- 3. HAMPE : avancer vers le Nord ----
+  seq_avancer(FLECHE_HAMPE_MM);
 }
 
 // ==============================================================================
