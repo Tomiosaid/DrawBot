@@ -44,6 +44,12 @@ float ax = 0.0, ay = 0.0, az = 9.81;
 float gx = 0.0, gy = 0.0, gz = 0.0;
 float mx = 0.0, my = 0.0, mz = 0.0;
 
+float headingMag   = 0.0f;   // cap magnétique corrigé (-180..+180°), mis à jour dans loop()
+float magOffsetX   = 0.0f;
+float magOffsetY   = 0.0f;
+bool  magCalibrated = false;
+#define MOUNTING_OFFSET 0.0f  // décalage montage LIS3MDL → ajuster si Nord décalé au premier test
+
 // --- ODOMÉTRIE CUMULÉE ---
 float posX = 0.0, posY = 0.0;
 float thetaEnc = 0.0;
@@ -388,6 +394,245 @@ static void seq_virerDroit() {
 }
 
 // ==============================================================================
+// PIVOT ENCODEUR N TICKS (générique, utilisé par orienterNord)
+// ==============================================================================
+
+// Pivot gauche N ticks : G recule, D avance
+static void seq_pivotGaucheN(long ticks, int speed) {
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, 0);     analogWrite(PIN_IN2_G, speed);
+  analogWrite(PIN_IN1_D, 0);     analogWrite(PIN_IN2_D, speed);
+  while (autoTicsG < ticks && autoTicsD < ticks) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(200);
+}
+
+// Pivot droit N ticks : G avance, D recule
+static void seq_pivotDroitN(long ticks, int speed) {
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  analogWrite(PIN_IN1_G, speed); analogWrite(PIN_IN2_G, 0);
+  analogWrite(PIN_IN1_D, speed); analogWrite(PIN_IN2_D, 0);
+  while (autoTicsG < ticks && autoTicsD < ticks) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(200);
+}
+
+// Recul encodeurs purs (miroir de seq_avancer mais en arrière, sans gyro)
+static void seq_reculer(float distanceMm) {
+  resetAutoEncoders();
+  const float STOP_THRESHOLD = -10.0f;
+  const int   BASE_SPEED     = 150;
+  reculerMoteurs(BASE_SPEED, BASE_SPEED);
+  while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
+    server.handleClient();
+    delay(10);
+  }
+  arreterMoteurs();
+  delay(300);
+}
+
+// ==============================================================================
+// CALIBRATION HARD-IRON — spin 360° lent, capture min/max de mx et my
+// Résultat stocké dans magOffsetX / magOffsetY (µT)
+// Durée : ~8s (720° à ~90°/s à SPEED_PIVOT=130 → ~4s × 2 tours de sécurité)
+// ==============================================================================
+#define SPEED_CALIB 110  // vitesse réduite pour maximiser la précision
+
+void calibrerMagnetometre() {
+  Serial.println("CALIB MAG : début spin 360°...");
+
+  float mxMin = 1e9f, mxMax = -1e9f;
+  float myMin = 1e9f, myMax = -1e9f;
+
+  // Spin gauche sur place 2 tours complets (~8s) pour couvrir tout le cercle
+  const long TICKS_360 = (long)(TICKS_90 * 4);
+  const long TICKS_2TOURS = TICKS_360 * 2;
+
+  resetAutoEncoders();
+  digitalWrite(PIN_EN_G, HIGH); digitalWrite(PIN_EN_D, HIGH);
+  // Pivot gauche lent
+  analogWrite(PIN_IN1_G, 0);          analogWrite(PIN_IN2_G, SPEED_CALIB);
+  analogWrite(PIN_IN1_D, 0);          analogWrite(PIN_IN2_D, SPEED_CALIB);
+
+  while (autoTicsG < TICKS_2TOURS && autoTicsD < TICKS_2TOURS) {
+    sensors_event_t mag;
+    lis3mdl.getEvent(&mag);
+    float lx = mag.magnetic.x;
+    float ly = mag.magnetic.y;
+    if (lx < mxMin) mxMin = lx;
+    if (lx > mxMax) mxMax = lx;
+    if (ly < myMin) myMin = ly;
+    if (ly > myMax) myMax = ly;
+    server.handleClient();
+    delay(20);
+  }
+  arreterMoteurs();
+  delay(300);
+
+  magOffsetX = (mxMin + mxMax) / 2.0f;
+  magOffsetY = (myMin + myMax) / 2.0f;
+  magCalibrated = true;
+
+  Serial.printf("CALIB MAG OK | offX=%.2f offY=%.2f\n", magOffsetX, magOffsetY);
+  Serial.printf("  mxMin=%.2f mxMax=%.2f myMin=%.2f myMax=%.2f\n", mxMin, mxMax, myMin, myMax);
+}
+
+// ==============================================================================
+// MESURE DU CAP MAGNÉTIQUE (après calibration)
+// Retourne l'angle vers le Nord magnétique en degrés [-180 ; +180].
+//   0°   = Nord, +90° = Est, -90° = Ouest, ±180° = Sud
+// MOUNTING_OFFSET corrige l'orientation physique du LIS3MDL sur le robot.
+// ==============================================================================
+float mesurerCap() {
+  const int NB_SAMPLES = 50;
+  float sumX = 0, sumY = 0;
+
+  for (int i = 0; i < NB_SAMPLES; i++) {
+    sensors_event_t mag;
+    lis3mdl.getEvent(&mag);
+    sumX += mag.magnetic.x - magOffsetX;
+    sumY += mag.magnetic.y - magOffsetY;
+    delay(10);
+  }
+
+  float capRad = atan2(sumY / NB_SAMPLES, sumX / NB_SAMPLES);
+  float capDeg = capRad * (180.0f / PI) + MOUNTING_OFFSET;
+
+  // Normaliser dans [-180 ; +180]
+  while (capDeg >  180.0f) capDeg -= 360.0f;
+  while (capDeg < -180.0f) capDeg += 360.0f;
+
+  return capDeg;
+}
+
+// ==============================================================================
+// ORIENTATION VERS LE NORD — pivot encodeur pur
+// Cap mesuré → angle à pivoter → N ticks calculés depuis TICKS_90
+// Sens choisi = plus court chemin (|angle| ≤ 180°)
+// ==============================================================================
+static void seq_orienterNord() {
+  float cap = mesurerCap();
+  Serial.printf("CAP INITIAL : %.1f deg\n", cap);
+
+  // cap = angle entre l'avant du robot et le Nord  (0° = déjà face au Nord)
+  // Pour tourner vers Nord : on pivote de -cap
+  float correction = -cap;
+  while (correction >  180.0f) correction -= 360.0f;
+  while (correction < -180.0f) correction += 360.0f;
+
+  // Nombre de ticks proportionnel à TICKS_90
+  long ticks = (long)(fabs(correction) * TICKS_90 / 90.0f);
+
+  Serial.printf("CORRECTION : %.1f deg → %ld ticks\n", correction, ticks);
+
+  if (ticks < 3) return;  // déjà dans la tolérance
+
+  if (correction > 0) {
+    // correction positive = tourner à droite (G avance, D recule)
+    seq_pivotDroitN(ticks, SPEED_PIVOT);
+  } else {
+    // correction négative = tourner à gauche (G recule, D avance)
+    seq_pivotGaucheN(ticks, SPEED_PIVOT);
+  }
+
+  // Vérification finale
+  float capFinal = mesurerCap();
+  Serial.printf("CAP FINAL  : %.1f deg\n", capFinal);
+}
+
+// ==============================================================================
+// FLÈCHE NORD — dessinée vers l'avant du robot (= le Nord après orienterNord)
+//
+// Géométrie :
+//   Hampe : 40 mm tout droit
+//   Tête  : depuis la pointe de la hampe,
+//           - arc gauche  12 mm (roue gauche lente, droite rapide)
+//           - retour au centre (recul 12 mm)
+//           - arc droit   12 mm (roue droite lente, gauche rapide)
+//
+// Tolérance barème : longueur totale > 30 mm → 40 mm hampe largement satisfait.
+// Les arcs de la tête sont en avant depuis la pointe : ils tracent deux courbes
+// symétriques vers l'extérieur, formant une pointe de flèche lisible.
+// ==============================================================================
+#define FLECHE_HAMPE_MM   40.0f
+#define FLECHE_BRANCHE_MM 12.0f
+
+// Arc avant gauche : G lente, D rapide (robot courbe vers la gauche)
+#define SPEED_BRANCH_FAST  130
+#define SPEED_BRANCH_SLOW   50
+
+static void seq_arcBrancheGauche() {
+  resetAutoEncoders();
+  float ticks_cible = FLECHE_BRANCHE_MM / MM_PAR_TICK;
+  avancerMoteurs(SPEED_BRANCH_SLOW, SPEED_BRANCH_FAST);  // G lente → courbe gauche
+  while (getAutoAverageDistance() < FLECHE_BRANCHE_MM * 0.85f) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(150);
+}
+
+// Arc avant droit : G rapide, D lente (robot courbe vers la droite)
+static void seq_arcBrancheDroite() {
+  resetAutoEncoders();
+  avancerMoteurs(SPEED_BRANCH_FAST, SPEED_BRANCH_SLOW);  // D lente → courbe droite
+  while (getAutoAverageDistance() < FLECHE_BRANCHE_MM * 0.85f) {
+    server.handleClient();
+    delay(5);
+  }
+  arreterMoteurs();
+  delay(150);
+}
+
+static void seq_flecheNord() {
+  seq_resetGyro();
+
+  // 1. Hampe : avancer 40 mm tout droit
+  seq_avancer(FLECHE_HAMPE_MM);
+
+  // 2. Branche gauche depuis la pointe
+  seq_arcBrancheGauche();
+
+  // 3. Revenir au centre (recul 12 mm)
+  seq_reculer(FLECHE_BRANCHE_MM);
+
+  // 4. Branche droite depuis la pointe
+  seq_arcBrancheDroite();
+}
+
+// ==============================================================================
+// SÉQUENCE 3 : FLÈCHE NORD COMPLÈTE
+//   Étape 1 — calibration hard-iron (spin 360° lent)
+//   Étape 2 — orienter le robot face au Nord (pivot encodeur)
+//   Étape 3 — dessiner la flèche vers l'avant
+// ==============================================================================
+void drawNorthArrow() {
+  sequenceEnCours = true;
+
+  Serial.println("SEQ3 : début calibration magnétomètre...");
+  calibrerMagnetometre();
+
+  Serial.println("SEQ3 : orientation vers le Nord...");
+  seq_orienterNord();
+
+  Serial.println("SEQ3 : dessin flèche Nord...");
+  seq_flecheNord();
+
+  arreterMoteurs();
+  sequenceEnCours = false;
+  Serial.println("SEQ3 : terminé.");
+}
+
+// ==============================================================================
 // TESTS DE CALIBRATION
 // ==============================================================================
 
@@ -615,6 +860,11 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="sequence-section">
         <h3>Séquences de dessin</h3>
         <button class="btn-sequence" onclick="lancerSequence(1)">Séquence 1 - Escalier</button>
+        <button class="btn-sequence" style="background:#27ae60;" onclick="lancerSequence(3)">Séquence 3 - Flèche Nord</button>
+        <div id="mag-status" style="margin-top:6px; font-size:13px; color:#555;">
+          Cap magnétique : <span id="heading-val" style="font-weight:bold; color:#27ae60;">--°</span>
+          &nbsp;|&nbsp; Calibration : <span id="mag-cal" style="font-weight:bold; color:#e67e22;">NON</span>
+        </div>
         <hr style="margin:15px 0; border-color:#eee;">
         <b style="color:#555; font-size:14px;">Calibration</b><br>
         <button class="btn-sequence" style="background:#e67e22;" onclick="lancerTest('distance')">Test Distance (1000 ticks)</button>
@@ -761,6 +1011,13 @@ const char index_html[] PROGMEM = R"rawliteral(
                 document.getElementById('mx').innerText = data.mx.toFixed(2);
                 document.getElementById('my').innerText = data.my.toFixed(2);
                 document.getElementById('mz').innerText = data.mz.toFixed(2);
+
+                if (data.heading !== undefined) {
+                    document.getElementById('heading-val').innerText = data.heading.toFixed(1) + "°";
+                    const calEl = document.getElementById('mag-cal');
+                    calEl.innerText = data.magCal ? "OUI" : "NON";
+                    calEl.style.color = data.magCal ? "#27ae60" : "#e67e22";
+                }
             }).catch(err => console.log("Erreur telemetry:", err));
         }
 
@@ -815,7 +1072,9 @@ void handleTelemetry() {
   json += "\"mx\":" + String(mx, 2) + ",";
   json += "\"my\":" + String(my, 2) + ",";
   json += "\"mz\":" + String(mz, 2) + ",";
-  json += "\"yaw\":" + String(orientationZ, 1);
+  json += "\"yaw\":" + String(orientationZ, 1) + ",";
+  json += "\"heading\":" + String(headingMag, 1) + ",";
+  json += "\"magCal\":" + String(magCalibrated ? 1 : 0);
   json += "}";
   server.send(200, "application/json", json);
 }
@@ -827,6 +1086,15 @@ void handleSequence1() {
   }
   server.send(200, "text/plain", "Escalier lancé");
   drawStairs();
+}
+
+void handleSequence3() {
+  if (sequenceEnCours) {
+    server.send(409, "text/plain", "Séquence déjà en cours");
+    return;
+  }
+  server.send(200, "text/plain", "Flèche Nord lancée (calib + pivot + dessin)");
+  drawNorthArrow();
 }
 
 void handleTest() {
@@ -888,6 +1156,7 @@ void setup() {
   server.on("/action", handleAction);
   server.on("/telemetry", handleTelemetry);
   server.on("/sequence1", handleSequence1);
+  server.on("/sequence3", handleSequence3);
   server.on("/test", handleTest);
   server.on("/stop", handleStop);
   server.begin();
@@ -929,6 +1198,15 @@ void loop() {
   ax = accel.acceleration.x; ay = accel.acceleration.y; az = accel.acceleration.z;
   gx = gyro.gyro.x;          gy = gyro.gyro.y;          gz = gyro.gyro.z;
   mx = mag.magnetic.x;       my = mag.magnetic.y;       mz = mag.magnetic.z;
+
+  // Cap magnétique en temps réel (utilise les offsets si calibration faite)
+  if (magCalibrated) {
+    float cx = mx - magOffsetX;
+    float cy = my - magOffsetY;
+    headingMag = atan2(cy, cx) * (180.0f / PI) + MOUNTING_OFFSET;
+    while (headingMag >  180.0f) headingMag -= 360.0f;
+    while (headingMag < -180.0f) headingMag += 360.0f;
+  }
 
   // Calcul vitesse toutes les 100ms
   unsigned long tempsActuel = millis();
