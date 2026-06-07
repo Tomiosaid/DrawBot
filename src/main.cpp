@@ -628,9 +628,9 @@ static void seq_pivotAngleDroit(float angleDeg) {
 // ==============================================================================
 #define FLECHE_HAMPE_MM   40.0f
 #define ZIG_BASE_SPEED    120        // vitesse de base pendant la tête
-#define ZIG_DIFF_MAX      10         // différentiel très faible → zigzags très aigus
-#define ZIG_LEVELS        6          // 6 niveaux
-#define ZIG_DIST_MM       5.0f       // 5mm par demi-oscillation
+#define ZIG_DIFF_MAX      100        // différentiel max élevé → branches quasi-perpendiculaires
+#define ZIG_LEVELS        5          // 5 niveaux (base large → pointe)
+#define ZIG_DIST_MM       8.0f       // 8mm par demi-branche
 
 // Avance d'une courbe : roue gauche à leftPWM, droite à rightPWM, sur distMm
 static void seq_courbe(float distMm, int leftPWM, int rightPWM) {
@@ -653,10 +653,11 @@ static void seq_flecheNord() {
 
   // 2. TÊTE : zigzags décroissants en avançant vers la pointe
   // Niveau i = ZIG_LEVELS (base, large) → 1 (pointe, quasi-droit)
+  // Roue lente = 0 au niveau max → branche quasi-perpendiculaire
+  // Roue lente augmente progressivement → angle obtus vers la pointe
   for (int i = ZIG_LEVELS; i >= 1; i--) {
-    int diff = (int)((float)i * ZIG_DIFF_MAX / ZIG_LEVELS);
-    int fast = constrain(ZIG_BASE_SPEED + diff, 80, 255);
-    int slow = constrain(ZIG_BASE_SPEED - diff, 60, 255);
+    int fast = ZIG_BASE_SPEED + 40;                              // roue rapide : constante
+    int slow = (int)((float)(ZIG_LEVELS - i) * 80.0f / (ZIG_LEVELS - 1)); // 0 → 80 progressivement
 
     // Demi-oscillation droite : roue gauche rapide → courbe à droite
     seq_courbe(ZIG_DIST_MM, fast, slow);
