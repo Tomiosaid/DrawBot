@@ -527,35 +527,48 @@ float mesurerCap() {
 // Cap mesuré → angle à pivoter → N ticks calculés depuis TICKS_90
 // Sens choisi = plus court chemin (|angle| ≤ 180°)
 // ==============================================================================
-static void seq_orienterNord() {
+// Une passe de correction : mesure le cap, pivote de -cap, retourne le cap residuel.
+static float seq_passeCorrection(int numPasse) {
   float cap = mesurerCap();
-  seq3Print("CAP INITIAL : " + String(cap, 1) + " deg");
+  seq3Print("P" + String(numPasse) + " cap=" + String(cap, 1) + " deg");
 
-  // cap = angle entre l'avant du robot et le Nord  (0° = déjà face au Nord)
-  // Convention LIS3MDL monté sur ce robot : tourner à droite fait BAISSER le cap
-  // → correction = cap (pas -cap) : positif = gauche, négatif = droite
-  float correction = cap;
+  float correction = -cap;
   while (correction >  180.0f) correction -= 360.0f;
   while (correction < -180.0f) correction += 360.0f;
 
-  // Nombre de ticks proportionnel à TICKS_90
   long ticks = (long)(fabs(correction) * TICKS_90 / 90.0f);
+  seq3Print("  corr=" + String(correction, 1) + " -> " + String(ticks) + " ticks");
 
-  seq3Print("CORRECTION : " + String(correction, 1) + " deg -> " + String(ticks) + " ticks");
-
-  if (ticks < 3) return;  // déjà dans la tolérance
-
-  if (correction > 0) {
-    // correction positive = tourner à droite (G avance, D recule)
-    seq_pivotDroitN(ticks, SPEED_PIVOT);
-  } else {
-    // correction négative = tourner à gauche (G recule, D avance)
-    seq_pivotGaucheN(ticks, SPEED_PIVOT);
+  if (ticks < 5) {
+    seq3Print("  -> tolerance ok");
+    return cap;
   }
 
-  // Vérification finale
-  float capFinal = mesurerCap();
-  seq3Print("CAP FINAL  : " + String(capFinal, 1) + " deg");
+  if (correction > 0) {
+    seq_pivotDroitN(ticks, SPEED_PIVOT);
+  } else {
+    seq_pivotGaucheN(ticks, SPEED_PIVOT);
+  }
+  delay(400);
+  return mesurerCap();
+}
+
+static void seq_orienterNord() {
+  // Passe 1 : grande correction
+  float r = seq_passeCorrection(1);
+  seq3Print("  -> residu P1=" + String(r, 1) + " deg");
+
+  // Passe 2 : affinage
+  r = seq_passeCorrection(2);
+  seq3Print("  -> residu P2=" + String(r, 1) + " deg");
+
+  // Passe 3 : si encore > 10 deg
+  if (fabs(r) > 10.0f) {
+    r = seq_passeCorrection(3);
+    seq3Print("  -> residu P3=" + String(r, 1) + " deg");
+  }
+
+  seq3Print("CAP FINAL : " + String(r, 1) + " deg");
 }
 
 // ==============================================================================
