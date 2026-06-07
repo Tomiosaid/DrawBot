@@ -539,7 +539,9 @@ void drawStairs() {
   marquerPoint();        // ET1.1 : marquage départ
 
   seq_avancer(200.0f);  // segment 1 : 20 cm
-  seq_marche();         // marche : arc ~10cm + correction
+  seq_virerGauche();    // angle 1 : pivot gauche 90°
+  seq_avancer(100.0f);  // segment 2 : 10 cm (la marche)
+  seq_virerDroit();     // angle 2 : pivot droit 90°
   seq_avancer(400.0f);  // segment 3 : 40 cm
 
   marquerPoint();        // ET1.1 : marquage arrivée
