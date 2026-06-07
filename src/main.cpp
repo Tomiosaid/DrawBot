@@ -539,7 +539,7 @@ void drawStairs() {
 
   marquerPoint();        // ET1.1 : marquage départ
 
-  seq_avancer(200.0f);  // segment 1 : 20 cm
+  seq_avancer(160.0f);  // segment 1 : 16 cm (+ ~4 cm début arc = 20 cm visuel)
   seq_marche();         // marche : arc ~10cm + correction
   seq_avancer(260.0f);  // segment 3 : 26 cm (repo ~14 + seg3 26 = 40 cm total)
 
