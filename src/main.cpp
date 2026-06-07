@@ -741,22 +741,50 @@ static void seq_reculer_asservi(float distanceMm, float capCible) {
   delay_gyro(150);
 }
 
-// Balayage polaire — dessine le triangle rempli
+// Balayage polaire — dessine la hampe (3cm) puis le triangle rempli
+// Géométrie : le stylo est à 135mm derrière l'axe des roues.
+// Quand le robot pivote de θ, le stylo balaie un arc de rayon 135mm.
+// Quand il avance de d à l'angle θ, le stylo trace une ligne radiale.
+// Pour que les BORDS du triangle soient DROITS (pas concaves), la longueur
+// de chaque ligne doit suivre : L(θ) = PEN_OFFSET - R_TIP / (cosθ - K·sinθ)
+// où K est la pente du côté du triangle en coordonnées polaires.
 void sequence3_FlecheNord() {
   seq_resetGyro();  // cap 0° = Nord (robot déjà aligné)
 
-  const float ANGLE_MAX    = 10.66f;
-  const float PAS_ANGLE    = 1.2f;
-  const float HAUTEUR_MAX  = 50.0f;
+  // 1. Hampe : avancer 30 mm tout droit vers le Nord (le stylo trace la tige)
+  seq_avancer_asservi(30.0f, 0.0f);
+  delay_gyro(200);
 
-  // 1. Aller au bord gauche
+  // 2. Paramètres du triangle
+  const float ANGLE_MAX    = 10.66f;   // demi-angle du triangle (°) → base ≈ 50mm
+  const float PAS_ANGLE    = 1.2f;     // pas entre passes (°) → ~3mm de stylo
+  const float HAUTEUR_MAX  = 50.0f;    // profondeur max de ligne (mm) au centre
+
+  // Pré-calcul de la constante pour bords droits
+  const float THETA_MAX_RAD = ANGLE_MAX * PI / 180.0f;
+  const float R_TIP = PEN_OFFSET_MM - HAUTEUR_MAX;  // 135 - 50 = 85mm
+  const float COS_MAX = cos(THETA_MAX_RAD);
+  const float SIN_MAX = sin(THETA_MAX_RAD);
+  // Pente : relie la pointe (r=85, θ=0) au coin de base (r=135, θ=±max)
+  const float SLOPE = (PEN_OFFSET_MM * COS_MAX - R_TIP) / (PEN_OFFSET_MM * SIN_MAX);
+
+  // 3. Pivoter au bord pour commencer le balayage
   seq_pivot_absolu(-ANGLE_MAX);
 
-  // 2. Balayage gauche → droite
+  // 4. Balayage gauche → droite (remplit le triangle)
   for (float capActuel = -ANGLE_MAX; capActuel <= ANGLE_MAX; capActuel += PAS_ANGLE) {
     seq_pivot_absolu(capActuel);
 
-    float longueurLigne = HAUTEUR_MAX * (1.0f - (abs(capActuel) / ANGLE_MAX));
+    // Formule corrigée pour bords droits du triangle
+    float theta_rad = fabs(capActuel) * PI / 180.0f;
+    float denom = cos(theta_rad) - SLOPE * sin(theta_rad);
+    float longueurLigne = 0.0f;
+    if (denom > 0.01f) {
+      longueurLigne = PEN_OFFSET_MM - R_TIP / denom;
+    }
+
+    // Sécurité : borner entre 0 et HAUTEUR_MAX
+    longueurLigne = constrain(longueurLigne, 0.0f, HAUTEUR_MAX);
 
     if (longueurLigne > 3.0f) {
       seq_avancer_asservi(longueurLigne, capActuel);
@@ -764,7 +792,7 @@ void sequence3_FlecheNord() {
     }
   }
 
-  // 3. Revenir au centre (cap Nord)
+  // 5. Revenir au centre (cap Nord)
   seq_pivot_absolu(0.0f);
 }
 
