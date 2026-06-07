@@ -615,59 +615,60 @@ static void seq_pivotAngleDroit(float angleDeg) {
 }
 
 // ==============================================================================
-// FLECHE NORD : hampe 40mm + triangle isocele (perimetre)
+// FLECHE NORD : hampe 40mm (obligatoire) + triangle isocele (périmètre)
 //
-// Triangle :  base 40mm, hauteur 40mm
-//   demi-base = 20mm, cote = sqrt(20^2+40^2) = 44.7mm
-//   angle base/cote = atan(40/20) = 63.4 deg
-//   angle au sommet = 180 - 2*63.4 = 53.1 deg
+// Géométrie (stylo ne se lève jamais) :
 //
-// Tracé depuis le centre de la base, face au Nord :
-//   [A] avance 40mm (hampe) → arrive centre base
-//   [B] pivot D 90°         → face droite
-//   [C] avance 20mm         → coin base-droit
-//   [D] pivot G 116°        → face vers apex (180-63.4=116.6)
-//   [E] avance 44.7mm       → apex (pointe Nord)
-//   [F] pivot G 127°        → face vers coin base-gauche (360-2*116.6=126.8)
-//   [G] avance 44.7mm       → coin base-gauche
-//   [H] pivot G 116°        → face gauche
-//   [I] avance 40mm         → ferme la base (retour centre base)
-//   [J] pivot D 90°         → retour face Nord
+//           C  ← apex (pointe Nord)
+//          / \
+//   44.7mm/   \44.7mm    (hypoténuse = √(20²+40²))
+//        /     \
+//       B       D  ← fin du tracé
+//  20mm |
+//       A  ← arrivée tige, pivot D 90°
+//       |
+//  40mm |  tige plein Nord (obligatoire)
+//       |
+//  [DÉPART — robot face au Nord après seq_orienterNord()]
+//
+// Angles de virage (pivot sur place, encodeurs purs) :
+//   A→B : pivot DROIT  90°       (face Est vers coin base-droit)
+//   B→C : pivot GAUCHE 116.57°   (= 90° + arctan(20/40) = 90° + 26.57°)
+//   C→D : pivot GAUCHE 126.86°   (= 180° − 2×26.57°  — angle au sommet)
+//
+// Conversion angle→ticks : ticks = angle × TICKS_90 / 90
+// TICKS_90 = 198 (calibré, validé à 90° pile)
 // ==============================================================================
 #define FLECHE_HAMPE_MM  40.0f
 #define TRI_DEMI_BASE    20.0f
-#define TRI_COTE_MM      44.7f
-#define TRI_ANGLE_BASE   116.6f   // angle de virage aux coins de la base
-#define TRI_ANGLE_APEX   126.8f   // angle de virage au sommet
+#define TRI_COTE_MM      44.72f
+#define TRI_ANGLE_BASE   116.57f  // angle de virage aux coins de la base
+#define TRI_ANGLE_APEX   126.86f  // angle de virage au sommet
 
 static void seq_flecheNord() {
   seq_resetGyro();
 
-  // A. Hampe
+  // [1] Tige plein Nord — 40 mm obligatoire
+  seq3Print("Fleche [1/5] : tige 40mm...");
   seq_avancer(FLECHE_HAMPE_MM);
 
-  // B. Vers coin base-droit
+  // [2] Pivot droit 90° → face Est (vers coin base-droit)
+  seq3Print("Fleche [2/5] : pivot D 90deg...");
   seq_pivotAngleDroit(90.0f);
-  // C.
+
+  // [3] Demi-base droite — 20 mm
+  seq3Print("Fleche [3/5] : demi-base 20mm...");
   seq_avancer(TRI_DEMI_BASE);
 
-  // D. Vers apex
+  // [4] Pivot gauche 116.57° + côté droit vers l'apex — 44.72 mm
+  seq3Print("Fleche [4/5] : pivot G 116.57deg + cote 44.72mm...");
   seq_pivotAngleGauche(TRI_ANGLE_BASE);
-  // E.
   seq_avancer(TRI_COTE_MM);
 
-  // F. Vers coin base-gauche
+  // [5] Pivot gauche 126.86° + côté gauche depuis l'apex — 44.72 mm
+  seq3Print("Fleche [5/5] : pivot G 126.86deg + cote 44.72mm...");
   seq_pivotAngleGauche(TRI_ANGLE_APEX);
-  // G.
   seq_avancer(TRI_COTE_MM);
-
-  // H. Ferme la base
-  seq_pivotAngleGauche(TRI_ANGLE_BASE);
-  // I.
-  seq_avancer(TRI_DEMI_BASE);
-
-  // J. Retour face Nord
-  seq_pivotAngleDroit(90.0f);
 }
 
 // ==============================================================================
