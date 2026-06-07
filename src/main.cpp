@@ -326,11 +326,10 @@ static void seq_majGyro() {
 static void seq_avancer(float distanceMm) {
   delay(100);            // stabilisation mécanique avant démarrage
   resetAutoEncoders();   // RAZ propre après stabilisation (élimine ticks de rebond)
-  seq_resetGyro();       // cap actuel = référence 0°
 
   const float STOP_THRESHOLD = -10.0f;
   const int   BASE_SPEED     = 150;
-  const float KP_GYRO        = 6.0f;  // correction gyroscopique (augmenter si dérive persiste)
+  const float KP_GYRO        = 8.0f;  // correction vers cap absolu 0°
 
   while (getAutoAverageDistance() < distanceMm - STOP_THRESHOLD) {
     seq_majGyro();
@@ -538,12 +537,13 @@ static void seq_marche() {
 // ==============================================================================
 void drawStairs() {
   sequenceEnCours = true;
+  seq_resetGyro();       // cap absolu = 0° fixé au départ (segment 1 = référence)
 
   marquerPoint();        // ET1.1 : marquage départ
 
   seq_avancer(200.0f);  // segment 1 : 20 cm
   seq_marche();         // marche : arc ~10cm + correction
-  seq_avancer(400.0f);  // segment 3 : 40 cm
+  seq_avancer(400.0f);  // segment 3 : corrige vers cap 0° (parallèle au segment 1)
 
   marquerPoint();        // ET1.1 : marquage arrivée
 
